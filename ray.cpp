@@ -57,7 +57,9 @@ struct  image_u32 {
 };
 
 struct  material {
-    v3 color;
+    f32 Scatter; // 0 is pure diffuse 1 is mirror
+    v3 EmitColor;
+    v3 RefColor;
 };
 
 struct plane {
@@ -83,61 +85,110 @@ struct world {
     sphere *Spheres;
 };
 
+internal f32
+RandomUnilateral(void) {
+    return ((f32)rand()/ (f32)RAND_MAX);
+}
+
+internal f32
+RandomBilateral(void) {
+    return -1.0f + 2.0f*RandomUnilateral();
+}
+
 internal v3
 RayCast (world *World, v3 RayOrigin, v3 RayDirection) {
 
-    v3 Result = World->Materials[0].color;
+    v3 Result = {};
+    v3 Attenuation = V3(1.0f, 1.0f, 1.0f);;
 
-    f32 HitDistance = F32Max;
+    f32 MinHitDistance = 0.001f;
     f32 Tolerence = 0.0001f;
 
     // HIT TEST FOR PLANES
-    for(u32 PlaneIndex =0;
-        PlaneIndex < World->PlaneCount;
-        ++PlaneIndex) {
+    for(u32 RayCount = 0;
+        RayCount < 8;
+        ++RayCount){    
 
-            plane Plane = World->Planes[PlaneIndex];
-            
-            f32 denominator = Inner(Plane.N,RayDirection);
-            if (( denominator < -Tolerence) >  (denominator >Tolerence)) {
-            f32 t = (-Plane.d - Inner(Plane.N, RayOrigin))/denominator;
+            f32 HitDistance = F32Max;
 
-            if((t > 0 && (t < HitDistance))) {
-                HitDistance = t;
-                Result = World->Materials[Plane.MatIndex].color;
+            u32 HitmMatIndex = 0;
+            v3 NextOrigin = V3(0.0f, 0.0f, 0.0f);
+            v3 NextNormal = V3(0.0f, 0.0f, 0.0f);;
+
+            for(u32 PlaneIndex = 0;
+            PlaneIndex < World->PlaneCount;
+            ++PlaneIndex) {
+
+                plane Plane = World->Planes[PlaneIndex];
+
+                f32 denominator = Inner(Plane.N,RayDirection);
+                if (( denominator < -Tolerence) >  (denominator >Tolerence)) {
+                f32 t = (-Plane.d - Inner(Plane.N, RayOrigin))/denominator;
+
+                if((t > MinHitDistance && (t < HitDistance))) {
+                    HitDistance = t;
+                    HitmMatIndex = Plane.MatIndex;
+
+                    NextOrigin = RayOrigin + t*RayDirection;
+                    NextNormal = Plane.N;
+                }
             }
         }
-    }
 
-    for(u32 SphereIndex = 0;
-        SphereIndex < World->SphereCount;
-        ++SphereIndex) {
+        for(u32 SphereIndex = 0;
+            SphereIndex < World->SphereCount;
+            ++SphereIndex) {
 
-            sphere Sphere = World->Spheres[SphereIndex];
+                sphere Sphere = World->Spheres[SphereIndex];
 
-            v3 SphereRelativePosition = RayOrigin - Sphere.P;
-            f32 a = Inner(RayDirection,RayDirection);
-            f32 b = 2.0f*Inner(SphereRelativePosition,RayDirection);
-            f32 c = Inner(SphereRelativePosition, SphereRelativePosition) - Sphere.r*Sphere.r;
+                v3 SphereRelativePosition = RayOrigin - Sphere.P;
+                f32 a = Inner(RayDirection,RayDirection);
+                f32 b = 2.0f*Inner(SphereRelativePosition,RayDirection);
+                f32 c = Inner(SphereRelativePosition, SphereRelativePosition) - Sphere.r*Sphere.r;
 
-            f32 denominator = 2.0f*a;
-            f32 RootTerm = SquareRoot(b*b - 4.0f*a*c);
+                f32 denominator = 2.0f*a;
+                f32 RootTerm = SquareRoot(b*b - 4.0f*a*c);
 
-            if (RootTerm > Tolerence) {
-               
-            f32 tp = (-b + RootTerm) / denominator;
-            f32 tn = (-b - RootTerm) / denominator;
-            
-            f32 t = tp;
-
-            if ((tn > 0) && (tn < tp)) {
-                t = tn;
-            }
+                if (RootTerm > Tolerence) {
                 
-            if(((t > 0) && (t < HitDistance))) {
-                HitDistance = t;
-                Result = World->Materials[Sphere.MatIndex].color;
+                f32 tp = (-b + RootTerm) / denominator;
+                f32 tn = (-b - RootTerm) / denominator;
+                
+                f32 t = tp;
+
+                if ((tn > MinHitDistance) && (tn < tp)) {
+                    t = tn;
+                }
+
+                if(((t > MinHitDistance) && (t < HitDistance))) {
+                    HitDistance = t;
+                    HitmMatIndex = Sphere.MatIndex;
+                    
+                    // NextOrigin += HitDistance * RayDirection;
+                    NextOrigin = RayOrigin - t*RayDirection;
+                    NextNormal = NOZ(t*RayDirection + SphereRelativePosition);
+                }
             }
+        }
+
+        if(HitmMatIndex) {
+            material Mat = World->Materials[HitmMatIndex];
+
+
+            Result += Hadamard(Attenuation,Mat.EmitColor);
+            Attenuation = Hadamard(Attenuation, Mat.RefColor);
+
+            RayOrigin = NextOrigin;
+
+            // Reflection
+
+            v3 PureBounce = RayDirection - 2.0f*Inner(RayDirection,NextNormal)*NextNormal;
+            v3 RandomBounce = NOZ(NextNormal + V3(RandomBilateral(), RandomBilateral(), RandomBilateral()));
+            RayDirection = NOZ(Lerp(RandomBounce, Mat.Scatter, PureBounce));
+        } else {
+            material Mat = World->Materials[HitmMatIndex];
+            Result += Hadamard(Attenuation,Mat.EmitColor);
+            break;
         }
     }
     return Result;
@@ -191,13 +242,13 @@ int main() {
 
     printf("Raycasting....... \n");
 
-    image_u32 Image = makeImage(1920, 1080);
+    image_u32 Image = makeImage(2560, 1440);
 
     material Materials[3] = {};
 
-    Materials[0].color = V3(0.1f, 0.1f, 0.1f);
-    Materials[1].color = V3(1.0f, 0.0f, 0.0f);
-    Materials[2].color = V3(1.0f, 1.0f, 1.0f);
+    Materials[0].EmitColor = V3(0.3f, 0.4f, 0.5f);
+    Materials[1].RefColor = V3(0.5f, 0.5f, 0.5f);
+    Materials[2].RefColor = V3(0.7f, 0.5f, 0.3f);
 
     plane Planes = {};
     Planes.MatIndex = 1;
@@ -230,6 +281,7 @@ int main() {
     v3 FilmCenter = CameraPosiition - FilmDist*CamerZ;
 
     u32 *Out = Image.Pixels;
+    u32 RaysPerPixel = 16;
     for(u32 y = 0; y<Image.Height; ++y) {
         f32 FilmY = -1.0f + 2.0f*((f32)y/(f32)Image.Height); // Values from [-1,1]
         for(u32 x=0; x<Image.Width; ++x) {
@@ -238,14 +290,20 @@ int main() {
             v3 RayOrigin = CameraPosiition;
             v3 RayDirection = NOZ(FilmP - CameraPosiition);
             
-            v3 Color = RayCast(&World, RayOrigin, RayDirection);
+            v3 Color = {};
+            f32 Contribution = 1.0f/(f32)RaysPerPixel;
+            for(u32 RayIndex = 0;
+                RayIndex <RaysPerPixel;
+                ++RayIndex) {
+            Color += Contribution*RayCast(&World, RayOrigin, RayDirection);
+            }
 
             v4 BMPColor = V4(255.0f*Color, 255.0f);
             u32 BMPValue = BGRAPack4x8(BMPColor);
             *Out++ = BMPValue;
         }
-        if ((y % 64) == 0) {
-            printf("Raycasting Rows %d%%",100* y/Image.Height);
+        if ((y % 128) == 0) {
+            printf("Raycasting Rows %d%%  \n",100* y/Image.Height);
             fflush(stdout);
         }
     }
