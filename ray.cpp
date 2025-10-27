@@ -1,30 +1,38 @@
 #define _CRT_SECURE_NO_DEPRECATE // get rid of microsoft warning for fopen
 #include<stdio.h>
+#include<stdint.h>
 #include<stdlib.h>
 #include"ray_math.h"
 #include<float.h>
 #include<math.h>
+#include<time.h>
 
-typedef char unsigned u8;
-typedef short unsigned u16;
-typedef int unsigned u32;
+typedef uint8_t u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
 
-typedef char s8;
-typedef short s16;
-typedef int s32;
+typedef int8_t s8;
+typedef int16_t s16;
+typedef int32_t s32;
+typedef int64_t s64;
 
 typedef s32 b32;
 typedef s32 b32x;
 
 typedef float f32;
+typedef double f64;
 
 #define F32Max FLT_MAX
 #define F32Min FLT_MIN
 #define internal static
+#define global static
+
 #define MAX_WIDTH 3840
 #define MAX_HEIGHT 2160
 #define Pi32 3.14159265359f
 #define Tau32 6.2831853071f
+
 #define ArrayCount(Array) (sizeof(Array)/sizeof(Array[0]))
 
 //u -> unsigned 
@@ -83,6 +91,8 @@ struct world {
 
     u32 SphereCount;
     sphere *Spheres;
+
+    u64 BonucesComputed;
 };
 
 internal f32
@@ -105,15 +115,17 @@ RayCast (world *World, v3 RayOrigin, v3 RayDirection) {
     f32 Tolerence = 0.0001f;
 
     // HIT TEST FOR PLANES
-    for(u32 RayCount = 0;
-        RayCount < 8;
-        ++RayCount){    
+    for(u32 BounceCount = 0;
+        BounceCount < 8;
+        ++BounceCount){    
 
             f32 HitDistance = F32Max;
 
             u32 HitmMatIndex = 0;
             v3 NextOrigin = V3(0.0f, 0.0f, 0.0f);
-            v3 NextNormal = V3(0.0f, 0.0f, 0.0f);;
+            v3 NextNormal = V3(0.0f, 0.0f, 0.0f);
+
+            ++World->BonucesComputed;
 
             for(u32 PlaneIndex = 0;
             PlaneIndex < World->PlaneCount;
@@ -255,8 +267,8 @@ ExactLinearTosRGB(f32 L) {
 
 int main() {
 
+    clock_t StartClock = clock();
     printf("Raycasting....... \n");
-
     image_u32 Image = makeImage(1280, 720);
 
     material Materials[7] = {};
@@ -315,7 +327,7 @@ int main() {
     v3 FilmCenter = CameraPosiition - FilmDist*CamerZ;
 
     u32 *Out = Image.Pixels;
-    u32 RaysPerPixel = 16;
+    u32 RaysPerPixel = 64;
     f32 HalfPixW = 1.0f / (f32) Image.Width;
     f32 HalfPixH = 1.0f / (f32) Image.Height;
 
@@ -352,6 +364,13 @@ int main() {
     }
 
     const char *filename = "test.bmp";
+
+    clock_t EndClock = clock();
+    clock_t TimeElapsed = EndClock - StartClock;
+    printf("Raycasting time %ldms \n", TimeElapsed);
+    printf("Total Bounces %lld \n", World.BonucesComputed);
+    printf("Performance %lf ms per bounces \n", (f64)(TimeElapsed)/(f64)World.BonucesComputed);
+    
     WriteImage(Image, filename);
     
     printf("Raycasting Done....... \n");
