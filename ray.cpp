@@ -210,6 +210,13 @@ internal u32 GetTotalPixelSize(image_u32 Image) {
     return sizeof(u32)*Image.Width*Image.Height;
 }
 
+internal u32 *
+GetPixelPointer(image_u32 Image, u32 X, u32 Y) {
+    u32 *Result = Image.Pixels  + Y*Image.Width + X ;
+
+    return  Result;
+}
+
 internal image_u32 makeImage(u32 Width, u32 Height) {
     image_u32 Image = {};
     Image.Width = Width;
@@ -265,9 +272,65 @@ ExactLinearTosRGB(f32 L) {
     return S;
 }
 
+internal void
+renderTile(world *World, image_u32 Image, u32 XMin,u32 YMin,
+           u32 OnePastXMax, u32 OnePastYMax) {
+    
+    v3 CameraPosiition = V3(0, -10, 1);
+    v3 CamerZ  = NOZ(CameraPosiition);
+    v3 CameraX = NOZ(Cross(V3(0,0,1),CamerZ));
+    v3 CameraY = NOZ(Cross(CamerZ,CameraX));
+
+    f32 FilmDist = 1.0f;
+    f32 FilmH =  Image.Height > Image.Width ? ((f32)Image.Height/(f32)Image.Width) : 1.0f; // Handling Aspect Ratio
+    f32 FilmW =  Image.Width > Image.Height ? ((f32)Image.Width/(f32)Image.Height) : 1.0f; // Handling Aspect Ratio
+    f32 HalfFilmH = 0.5f*FilmH;
+    f32 HalfFilmW = 0.5f*FilmW;
+    v3 FilmCenter = CameraPosiition - FilmDist*CamerZ;
+    f32 HalfPixW = 1.0f / (f32) Image.Width;
+    f32 HalfPixH = 1.0f / (f32) Image.Height;
+    u32 RaysPerPixel = 64;
+
+    for(u32 y = YMin;
+        y < OnePastYMax;
+        ++y) {
+        u32 *Out = GetPixelPointer(Image, XMin, y);
+        f32 FilmY = -1.0f + 2.0f*((f32)y/(f32)Image.Height); // Values from [-1,1]
+        for(u32 x=0;
+            x < OnePastXMax;
+            ++x) {
+            f32 FilmX = -1.0f + 2.0f*((f32)x/(f32)Image.Width); // Values from [-1,1]
+            v3 Color = {};
+            f32 Contribution = 1.0f/(f32)RaysPerPixel;
+            for(u32 RayIndex = 0;
+                RayIndex <RaysPerPixel;
+                ++RayIndex) {   
+                    f32 Offx = FilmX + RandomBilateral()*HalfPixW;
+                    f32 Offy = FilmY + RandomBilateral()*HalfPixH; 
+                    v3 FilmP =  FilmCenter + Offx*HalfFilmW*CameraX + Offy*HalfFilmH*CameraY;
+                    v3 RayOrigin = CameraPosiition;
+                    v3 RayDirection = NOZ(FilmP - CameraPosiition);
+                    Color += Contribution*RayCast(World, RayOrigin, RayDirection);
+            }
+
+            v4 BMPColor = {
+                255.0f*ExactLinearTosRGB(Color.r),
+                255.0f*ExactLinearTosRGB(Color.g),
+                255.0f*ExactLinearTosRGB(Color.b),
+                255.0f
+            };
+            u32 BMPValue = BGRAPack4x8(BMPColor);
+            *Out++ = BMPValue;
+        }
+        if ((y % 128) == 0) {
+            printf("Raycasting Rows %d%%  \n",100* y/Image.Height);
+            fflush(stdout);
+        }
+    }
+}
 int main() {
 
-    clock_t StartClock = clock();
+   
     printf("Raycasting....... \n");
     image_u32 Image = makeImage(1280, 720);
 
@@ -314,54 +377,11 @@ int main() {
     World.SphereCount = ArrayCount(Sphere);
     World.Spheres = Sphere;
 
-    v3 CameraPosiition = V3(0, -10, 1);
-    v3 CamerZ  = NOZ(CameraPosiition);
-    v3 CameraX = NOZ(Cross(V3(0,0,1),CamerZ));
-    v3 CameraY = NOZ(Cross(CamerZ,CameraX));
 
-    f32 FilmDist = 1.0f;
-    f32 FilmH =  Image.Height > Image.Width ? ((f32)Image.Height/(f32)Image.Width) : 1.0f; // Handling Aspect Ratio
-    f32 FilmW =  Image.Width > Image.Height ? ((f32)Image.Width/(f32)Image.Height) : 1.0f; // Handling Aspect Ratio
-    f32 HalfFilmH = 0.5f*FilmH;
-    f32 HalfFilmW = 0.5f*FilmW;
-    v3 FilmCenter = CameraPosiition - FilmDist*CamerZ;
+    
+    clock_t StartClock = clock();
 
-    u32 *Out = Image.Pixels;
-    u32 RaysPerPixel = 64;
-    f32 HalfPixW = 1.0f / (f32) Image.Width;
-    f32 HalfPixH = 1.0f / (f32) Image.Height;
-
-    for(u32 y = 0; y<Image.Height; ++y) {
-        f32 FilmY = -1.0f + 2.0f*((f32)y/(f32)Image.Height); // Values from [-1,1]
-        for(u32 x=0; x<Image.Width; ++x) {
-            f32 FilmX = -1.0f + 2.0f*((f32)x/(f32)Image.Width); // Values from [-1,1]
-            v3 Color = {};
-            f32 Contribution = 1.0f/(f32)RaysPerPixel;
-            for(u32 RayIndex = 0;
-                RayIndex <RaysPerPixel;
-                ++RayIndex) {   
-                    f32 Offx = FilmX + RandomBilateral()*HalfPixW;
-                    f32 Offy = FilmY + RandomBilateral()*HalfPixH; 
-                    v3 FilmP =  FilmCenter + Offx*HalfFilmW*CameraX + Offy*HalfFilmH*CameraY;
-                    v3 RayOrigin = CameraPosiition;
-                    v3 RayDirection = NOZ(FilmP - CameraPosiition);
-                    Color += Contribution*RayCast(&World, RayOrigin, RayDirection);
-            }
-
-            v4 BMPColor = {
-                255.0f*ExactLinearTosRGB(Color.r),
-                255.0f*ExactLinearTosRGB(Color.g),
-                255.0f*ExactLinearTosRGB(Color.b),
-                255.0f
-            };
-            u32 BMPValue = BGRAPack4x8(BMPColor);
-            *Out++ = BMPValue;
-        }
-        if ((y % 128) == 0) {
-            printf("Raycasting Rows %d%%  \n",100* y/Image.Height);
-            fflush(stdout);
-        }
-    }
+    renderTile(&World,Image, 0, 0, Image.Width, Image.Height);
 
     const char *filename = "test.bmp";
 
