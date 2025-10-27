@@ -616,4 +616,20 @@ IsInRange(f32 Min, f32 Value, f32 Max)
     return(Result);
 }
 
+inline v4
+Linear1ToSRGB255(v4 C)
+{
+    v4 Result;
+
+    f32 One255 = 255.0f;
+
+    Result.r = One255*SquareRoot(C.r);
+    Result.g = One255*SquareRoot(C.g);
+    Result.b = One255*SquareRoot(C.b);
+    Result.a = One255*C.a;
+
+    return(Result);
+}
+
+
 #endif
