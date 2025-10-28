@@ -6,6 +6,7 @@
 #include<float.h>
 #include<math.h>
 #include<time.h>
+#include <assert.h>
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -115,9 +116,24 @@ struct world {
 
     u32 SphereCount;
     sphere *Spheres;
+};
 
-    u64 BonucesComputed;
-    u64 TilesRetiredCount;
+struct work_order {
+    world *World;
+    image_u32 Image;
+    u32 XMin;
+    u32 YMin;
+    u32 OnePastXMax;
+    u32 OnePastYMax;
+};
+
+struct work_queue {
+    u32 WorkOrderCount;
+    work_order *WorkOrders;
+
+    volatile u32 NextWorkOrderIndex;
+    volatile u64 BonucesComputed;
+    volatile u64 TileRetiredCount;
 };
 
 internal f32
@@ -198,9 +214,20 @@ ExactLinearTosRGB(f32 L) {
 }
 
 internal void
-renderTile(world *World, image_u32 Image, u32 XMin,u32 YMin,
-           u32 OnePastXMax, u32 OnePastYMax) {
+renderTile(work_queue *Queue) {
+    
+    u32 WorkOrderIndex = Queue->NextWorkOrderIndex++;
+    if (WorkOrderIndex >= Queue->WorkOrderCount) {
+        return;
+    }
 
+    work_order *Order = Queue->WorkOrders + WorkOrderIndex;
+    world *World =  Order->World;
+    image_u32 Image = Order->Image;
+    u32 XMin = Order->XMin;
+    u32 YMin = Order->YMin;
+    u32 OnePastXMax = Order->OnePastXMax;
+    u32 OnePastYMax = Order->OnePastYMax;
     v3 CameraPosiition = V3(0, -10, 1);
     v3 CameraZ  = NOZ(CameraPosiition);
     v3 CameraX = NOZ(Cross(V3(0,0,1),CameraZ));
@@ -253,7 +280,7 @@ renderTile(world *World, image_u32 Image, u32 XMin,u32 YMin,
                     v3 NextOrigin = V3(0.0f, 0.0f, 0.0f);
                     v3 NextNormal = V3(0.0f, 0.0f, 0.0f);
                 
-                    ++World->BonucesComputed;
+                    ++Queue->BonucesComputed;
                 
                     for(u32 PlaneIndex = 0;
                     PlaneIndex < World->PlaneCount;
@@ -345,8 +372,8 @@ renderTile(world *World, image_u32 Image, u32 XMin,u32 YMin,
         *Out++ = BMPValue;
     }
 }
-        World->BonucesComputed += BouncesComputed;
-        ++World->TilesRetiredCount;
+        Queue->BonucesComputed += BouncesComputed;
+        ++Queue->TileRetiredCount;
 }
 
 int main() {
@@ -407,10 +434,13 @@ int main() {
     u32 TileHeight = TileWidth;
     u32 TileCountY = (Image.Height + TileHeight - 1)/ TileHeight;
     u32 TileCountX = (Image.Width + TileWidth - 1)/ TileWidth;
+    u32 TotalTileCount = TileCountX*TileCountY; // correct
 
-    printf("Raycaster Configuration %d Cores with %dx%d (%dk/tile)tiles \n",
-        CoreCount, TileWidth, TileHeight, TileWidth*TileHeight*1/256); // 4/1024 
+    printf("Raycaster Configuration %d Cores: with %dx%d and Total Tiles: %d (%dk/tile)tiles \n",
+        CoreCount, TileWidth, TileHeight, TotalTileCount , TileWidth*TileHeight*1/256); // 4/1024 
 
+    work_queue Queue = {};
+    Queue.WorkOrders = (work_order *)malloc(TotalTileCount*sizeof(work_order));
     for(u32 TileY = 0;
         TileY < TileCountY;
         ++TileY) {
@@ -423,12 +453,27 @@ int main() {
                     u32 MinX = TileX * TileWidth;
                     u32 OnePastMaxX = MinX + TileWidth;
                     if(OnePastMaxX > Image.Width) { OnePastMaxX = Image.Width; }
-                    renderTile(&World,Image, MinX, MinY, OnePastMaxX, OnePastMaxY);
 
-                    printf("Raycasting %lld%% ...   ",100 * World.TilesRetiredCount / (TileCountY * TileCountX));
-                    fflush(stdout);
+                    work_order *Order = Queue.WorkOrders + Queue.WorkOrderCount++;
+                    assert(Queue.WorkOrderCount <= TotalTileCount);
+
+                    Order->World = &World;
+                    Order->Image = Image;
+                    Order->XMin = MinX;
+                    Order->YMin = MinY;
+                    Order->OnePastXMax = OnePastMaxX;
+                    Order->OnePastYMax = OnePastMaxY;
                 }
             }
+
+        assert(Queue.WorkOrderCount == TotalTileCount);
+
+        printf("\n Tiles Retired %lld \n", Queue.TileRetiredCount);
+        while (Queue.TileRetiredCount < TotalTileCount) {
+            renderTile(&Queue);
+            printf("Raycasting %lld%% ...   ",100 * Queue.TileRetiredCount / (TileCountY * TileCountX));
+            fflush(stdout);
+        }
 
     // renderTile(&World, Image, 0, 0, Image.Width,Image.Height);
 
@@ -437,8 +482,8 @@ int main() {
     clock_t EndClock = clock();
     clock_t TimeElapsed = EndClock - StartClock;
     printf("\n Raycasting time %ldms \n", TimeElapsed);
-    printf("Total Bounces %lld \n", World.BonucesComputed);
-    printf("Performance %lf ms per bounces \n", (f64)(TimeElapsed)/(f64)World.BonucesComputed);
+    printf("Total Bounces %lld \n", Queue.BonucesComputed);
+    printf("Performance %lf ms per bounces \n", (f64)(TimeElapsed)/(f64)Queue.BonucesComputed);
     
     WriteImage(Image, filename);
     
