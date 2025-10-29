@@ -32,6 +32,7 @@ typedef double f64;
 #define internal static
 #define global static
 
+#define U32Max ((u32)-1)
 #define MAX_WIDTH 3840
 #define MAX_HEIGHT 2160
 #define Pi32 3.14159265359f
@@ -100,6 +101,10 @@ struct world {
     sphere *Spheres;
 };
 
+struct random_series {
+    u32 State;
+};
+
 struct work_order {
     world *World;
     image_u32 Image;
@@ -107,6 +112,8 @@ struct work_order {
     u32 YMin;
     u32 OnePastXMax;
     u32 OnePastYMax;
+
+    random_series Entropy;
 };
 
 struct work_queue {
@@ -119,6 +126,15 @@ struct work_queue {
     volatile u64 BonucesComputed;
     volatile u64 TileRetiredCount;
 };
+
+u32 xorshift32(random_series *Series) {
+	/* Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs" */
+	u32 x = Series->State;
+	x ^= x << 13;
+	x ^= x >> 17;
+	x ^= x << 5;
+    return Series->State=x;
+}
 
 #if defined(_WIN32)
 u32 GetCPUCount() {

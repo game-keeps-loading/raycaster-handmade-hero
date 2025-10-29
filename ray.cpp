@@ -3,13 +3,13 @@
 #include"ray.h"
 
 internal f32
-RandomUnilateral(void) {
-    return ((f32)rand()/ (f32)RAND_MAX);
+RandomUnilateral(random_series *State) {
+    return ((f32)xorshift32(State)/ (f32)U32Max);
 }
 
 internal f32
-RandomBilateral(void) {
-    return -1.0f + 2.0f*RandomUnilateral();
+RandomBilateral(random_series *State) {
+    return -1.0f + 2.0f*RandomUnilateral(State);
 }
 
 
@@ -91,6 +91,9 @@ renderTile(work_queue *Queue) {
 
     work_order *Order = Queue->WorkOrders + WorkOrderIndex;
     world *World =  Order->World;
+
+    random_series State = Order->Entropy;
+
     image_u32 Image = Order->Image;
     u32 XMin = Order->XMin;
     u32 YMin = Order->YMin;
@@ -126,9 +129,9 @@ renderTile(work_queue *Queue) {
             f32 Contribution = 1.0f/(f32)RaysPerPixel;
             for(u32 RayIndex = 0;
                 RayIndex <RaysPerPixel;
-                ++RayIndex) {   
-                    f32 Offx = FilmX + RandomBilateral()*HalfPixW;
-                    f32 Offy = FilmY + RandomBilateral()*HalfPixH; 
+                ++RayIndex) {
+                    f32 Offx = FilmX + RandomBilateral(&State)*HalfPixW;
+                    f32 Offy = FilmY + RandomBilateral(&State)*HalfPixH; 
                     v3 FilmP =  FilmCenter + Offx*HalfFilmW*CameraX + Offy*HalfFilmH*CameraY;
                     v3 RayOrigin = CameraPosiition;
                     v3 RayDirection = NOZ(FilmP - CameraPosiition);
@@ -219,7 +222,9 @@ renderTile(work_queue *Queue) {
                     Attenuation = Hadamard(Attenuation, CosAtten*Mat.RefColor);
                     RayOrigin += HitDistance*RayDirection;
                     v3 PureBounce = RayDirection - 2.0f*Inner(RayDirection,NextNormal)*NextNormal;
-                    v3 RandomBounce = NOZ(NextNormal + V3(RandomBilateral(), RandomBilateral(), RandomBilateral()));
+                    v3 RandomBounce = NOZ(NextNormal + V3(RandomBilateral(&State),
+                                      RandomBilateral(&State), 
+                                      RandomBilateral(&State)));
                     RayDirection = NOZ(Lerp(RandomBounce, Mat.Scatter, PureBounce));
                 } else {
                     material Mat = World->Materials[HitmMatIndex];
@@ -301,7 +306,7 @@ int main() {
     // u32 CoreCount = 8;
     u32 TileWidth = Image.Width / CoreCount;
     u32 TileHeight = TileWidth;
-    TileWidth = TileHeight = 256;
+    TileWidth = TileHeight = 64;
     u32 TileCountY = (Image.Height + TileHeight - 1)/ TileHeight;
     u32 TileCountX = (Image.Width + TileWidth - 1)/ TileWidth;
     u32 TotalTileCount = TileCountX*TileCountY; // correct
@@ -339,6 +344,9 @@ int main() {
                     Order->YMin = MinY;
                     Order->OnePastXMax = OnePastMaxX;
                     Order->OnePastYMax = OnePastMaxY;
+
+                    random_series Entropy = { TileX*1024 + TileY*5120 };
+                    Order->Entropy = Entropy;
                 }
             }
 
