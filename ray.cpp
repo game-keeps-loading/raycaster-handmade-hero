@@ -79,25 +79,62 @@ ExactLinearTosRGB(f32 L) {
     return S;
 }
 
-struct cast_result {
+struct cast_state {
+    world *World;
+    u32 RaysPerPixel;
+    u32 MaxBounceCount;
+        
+    f32 FilmX;
+    f32 FilmY;
+    f32 HalfPixW;
+    f32 HalfPixH;
+        
+    v3 FilmCenter;
+    f32 HalfFilmW;
+    f32 HalfFilmH;
+    
+    v3 CameraX;
+    v3 CameraY;
+    v3 CameraZ;
+    v3 CameraPosiition;
+
+    random_series Series;
     v3 FinalColor;
     u64 BouncesComputed;
 };
 
-internal cast_result 
-CastSampleRays(world *World, u32 RaysPerPixel, u32 MaxBounceCount,
-                f32 FilmX, f32 FilmY, f32 HalfPixW, f32 HalfPixH,
-                v3 FilmCenter, f32 HalfFilmW, f32 HalfFilmH,
-                v3 CameraX, v3 CameraY, v3 CameraPosiition,
-                random_series State) {
-    cast_result Result = {};
+internal cast_state 
+CastSampleRays(cast_state *State) {
+
+    world *World = State->World;
+    u32 RaysPerPixel = State->RaysPerPixel;
+    u32 MaxBounceCount = State->MaxBounceCount;
+        
+    f32 FilmX = State->FilmX;
+    f32 FilmY = State->FilmY;
+    f32 HalfPixW = State->HalfPixW;
+    f32 HalfPixH = State->HalfPixH;
+        
+    v3 FilmCenter = State->FilmCenter;
+    f32 HalfFilmW = State->HalfFilmW;
+    f32 HalfFilmH = State->HalfFilmH;
+    
+    v3 CameraX = State->CameraX;
+    v3 CameraY = State->CameraY;
+    v3 CameraZ = State->CameraZ;
+    v3 CameraPosiition = State->CameraPosiition;
+
+    random_series Series = State->Series;
+    v3 FinalColor = State->FinalColor;
+
+    cast_state Result = {};
     f32 Contribution = 1.0f/(f32)RaysPerPixel;
 
     for(u32 RayIndex = 0;
         RayIndex <RaysPerPixel;
         ++RayIndex) {
-                    f32 Offx = FilmX + RandomBilateral(&State)*HalfPixW;
-                    f32 Offy = FilmY + RandomBilateral(&State)*HalfPixH; 
+                    f32 Offx = FilmX + RandomBilateral(&Series)*HalfPixW;
+                    f32 Offy = FilmY + RandomBilateral(&Series)*HalfPixH; 
                     v3 FilmP =  FilmCenter + Offx*HalfFilmW*CameraX + Offy*HalfFilmH*CameraY;
                     v3 RayOrigin = CameraPosiition;
                     v3 RayDirection = NOZ(FilmP - CameraPosiition);
@@ -188,9 +225,9 @@ CastSampleRays(world *World, u32 RaysPerPixel, u32 MaxBounceCount,
                     Attenuation = Hadamard(Attenuation, CosAtten*Mat.RefColor);
                     RayOrigin += HitDistance*RayDirection;
                     v3 PureBounce = RayDirection - 2.0f*Inner(RayDirection,NextNormal)*NextNormal;
-                    v3 RandomBounce = NOZ(NextNormal + V3(RandomBilateral(&State),
-                                      RandomBilateral(&State), 
-                                      RandomBilateral(&State)));
+                    v3 RandomBounce = NOZ(NextNormal + V3(RandomBilateral(&Series),
+                                      RandomBilateral(&Series), 
+                                      RandomBilateral(&Series)));
                     RayDirection = NOZ(Lerp(RandomBounce, Mat.Scatter, PureBounce));
                 } else {
                     material Mat = World->Materials[HitmMatIndex];
@@ -212,52 +249,56 @@ renderTile(work_queue *Queue) {
         return false;
     }
 
-    work_order *Order = Queue->WorkOrders + WorkOrderIndex;
-    world *World =  Order->World;
+    cast_state State;
 
-    random_series State = Order->Entropy;
+    work_order *Order = Queue->WorkOrders + WorkOrderIndex;
+    State.World =  Order->World;
+
+    State.Series = Order->Entropy;
 
     image_u32 Image = Order->Image;
     u32 XMin = Order->XMin;
     u32 YMin = Order->YMin;
     u32 OnePastXMax = Order->OnePastXMax;
     u32 OnePastYMax = Order->OnePastYMax;
-    v3 CameraPosiition = V3(0, -10, 1);
-    v3 CameraZ  = NOZ(CameraPosiition);
-    v3 CameraX = NOZ(Cross(V3(0,0,1),CameraZ));
-    v3 CameraY = NOZ(Cross(CameraZ,CameraX));
+    
+    State.CameraPosiition = V3(0, -10, 1);
+    State.CameraPosiition = V3(0, -10, 1);
+    State.CameraZ  = NOZ(State.CameraPosiition);
+    State.CameraPosiition = V3(0, -10, 1);
+    State.CameraX = NOZ(Cross(V3(0,0,1),State.CameraZ));
+    State.CameraPosiition = V3(0, -10, 1);
+    State.CameraPosiition = V3(0, -10, 1);
+    State.CameraY = NOZ(Cross(State.CameraZ,State.CameraX));
 
     f32 FilmDist = 1.0f;
     f32 FilmH =  Image.Height > Image.Width ? ((f32)Image.Height/(f32)Image.Width) : 1.0f; // Handling Aspect Ratio
     f32 FilmW =  Image.Width > Image.Height ? ((f32)Image.Width/(f32)Image.Height) : 1.0f; // Handling Aspect Ratio
-    f32 HalfFilmH = 0.5f*FilmH;
-    f32 HalfFilmW = 0.5f*FilmW;
-    v3 FilmCenter = CameraPosiition - FilmDist * CameraZ;
-    f32 HalfPixW = 1.0f / (f32) Image.Width;
-    f32 HalfPixH = 1.0f / (f32) Image.Height;
-    u32 RaysPerPixel = Queue->RaysPerPixel;
-    u32 MaxBounceCount = Queue->MaxBounceCount;
-    u64 BouncesComputed = 0;
+    State.HalfFilmH = 0.5f*FilmH;
+    State.HalfFilmW = 0.5f*FilmW;
+    State.FilmCenter = State.CameraPosiition - FilmDist * State.CameraZ;
+    State.HalfPixW = 1.0f / (f32) Image.Width;
+    State.HalfPixH = 1.0f / (f32) Image.Height;
+    State.RaysPerPixel = Queue->RaysPerPixel;
+    State.MaxBounceCount = Queue->MaxBounceCount;
+    State.BouncesComputed = 0;
 
     for(u32 y = YMin;
         y < OnePastYMax;
         ++y) {
         u32 *Out = GetPixelPointer(Image, XMin, y);
-        f32 FilmY = -1.0f + 2.0f*((f32)y/(f32)Image.Height); // Values from [-1,1]
+        State.FilmY = -1.0f + 2.0f*((f32)y/(f32)Image.Height); // Values from [-1,1]
         for(u32 x = XMin;
             x < OnePastXMax;
             ++x) {
-            f32 FilmX = -1.0f + 2.0f*((f32)x/(f32)Image.Width); // Values from [-1,1]
-            
-            cast_result Result = CastSampleRays(World, RaysPerPixel, MaxBounceCount,
-                FilmX, FilmY, HalfPixW, HalfPixH,
-                FilmCenter, HalfFilmW, HalfFilmH, 
-                CameraX, CameraY, CameraPosiition,
-                State);
+            State.FilmX = -1.0f + 2.0f*((f32)x/(f32)Image.Width); // Values from [-1,1]
+ 
+            cast_state Result = CastSampleRays(&State);
 
-                BouncesComputed += Result.BouncesComputed;
-                v3 FinalColor = Result.FinalColor;
-        v4 BMPColor = {
+            State.BouncesComputed += Result.BouncesComputed;
+            v3 FinalColor = Result.FinalColor;
+        
+            v4 BMPColor = {
             255.0f*ExactLinearTosRGB(FinalColor.r),
             255.0f*ExactLinearTosRGB(FinalColor.g),
             255.0f*ExactLinearTosRGB(FinalColor.b),
@@ -268,7 +309,7 @@ renderTile(work_queue *Queue) {
     }
 }
 
-        LockedADDAndReturnPreviousValue(&Queue->BonucesComputed, BouncesComputed);
+        LockedADDAndReturnPreviousValue(&Queue->BonucesComputed, State.BouncesComputed);
         LockedADDAndReturnPreviousValue(&Queue->TileRetiredCount, 1 );
         return true;
     }
