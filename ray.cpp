@@ -79,57 +79,23 @@ ExactLinearTosRGB(f32 L) {
     return S;
 }
 
+struct cast_result {
+    v3 FinalColor;
+    u64 BouncesComputed;
+};
 
+internal cast_result 
+CastSampleRays(world *World, u32 RaysPerPixel, u32 MaxBounceCount,
+                f32 FilmX, f32 FilmY, f32 HalfPixW, f32 HalfPixH,
+                v3 FilmCenter, f32 HalfFilmW, f32 HalfFilmH,
+                v3 CameraX, v3 CameraY, v3 CameraPosiition,
+                random_series State) {
+    cast_result Result = {};
+    f32 Contribution = 1.0f/(f32)RaysPerPixel;
 
-internal b32x
-renderTile(work_queue *Queue) {
-
-    u64 WorkOrderIndex = LockedADDAndReturnPreviousValue(&Queue->NextWorkOrderIndex,1);
-    if (WorkOrderIndex >= Queue->WorkOrderCount) {
-        return false;
-    }
-
-    work_order *Order = Queue->WorkOrders + WorkOrderIndex;
-    world *World =  Order->World;
-
-    random_series State = Order->Entropy;
-
-    image_u32 Image = Order->Image;
-    u32 XMin = Order->XMin;
-    u32 YMin = Order->YMin;
-    u32 OnePastXMax = Order->OnePastXMax;
-    u32 OnePastYMax = Order->OnePastYMax;
-    v3 CameraPosiition = V3(0, -10, 1);
-    v3 CameraZ  = NOZ(CameraPosiition);
-    v3 CameraX = NOZ(Cross(V3(0,0,1),CameraZ));
-    v3 CameraY = NOZ(Cross(CameraZ,CameraX));
-
-    f32 FilmDist = 1.0f;
-    f32 FilmH =  Image.Height > Image.Width ? ((f32)Image.Height/(f32)Image.Width) : 1.0f; // Handling Aspect Ratio
-    f32 FilmW =  Image.Width > Image.Height ? ((f32)Image.Width/(f32)Image.Height) : 1.0f; // Handling Aspect Ratio
-    f32 HalfFilmH = 0.5f*FilmH;
-    f32 HalfFilmW = 0.5f*FilmW;
-    v3 FilmCenter = CameraPosiition - FilmDist * CameraZ;
-    f32 HalfPixW = 1.0f / (f32) Image.Width;
-    f32 HalfPixH = 1.0f / (f32) Image.Height;
-    u32 RaysPerPixel = Queue->RaysPerPixel;
-    u32 MaxBounceCount = Queue->MaxBounceCount;
-    u64 BouncesComputed = 0;
-
-    for(u32 y = YMin;
-        y < OnePastYMax;
-        ++y) {
-        u32 *Out = GetPixelPointer(Image, XMin, y);
-        f32 FilmY = -1.0f + 2.0f*((f32)y/(f32)Image.Height); // Values from [-1,1]
-        for(u32 x = XMin;
-            x < OnePastXMax;
-            ++x) {
-            f32 FilmX = -1.0f + 2.0f*((f32)x/(f32)Image.Width); // Values from [-1,1]
-            v3 FinalColor = {};
-            f32 Contribution = 1.0f/(f32)RaysPerPixel;
-            for(u32 RayIndex = 0;
-                RayIndex <RaysPerPixel;
-                ++RayIndex) {
+    for(u32 RayIndex = 0;
+        RayIndex <RaysPerPixel;
+        ++RayIndex) {
                     f32 Offx = FilmX + RandomBilateral(&State)*HalfPixW;
                     f32 Offy = FilmY + RandomBilateral(&State)*HalfPixH; 
                     v3 FilmP =  FilmCenter + Offx*HalfFilmW*CameraX + Offy*HalfFilmH*CameraY;
@@ -145,14 +111,14 @@ renderTile(work_queue *Queue) {
             for(u32 BounceCount = 0;
                 BounceCount < MaxBounceCount;
                 ++BounceCount){    
-                    ++BouncesComputed;
+                    ++Result.BouncesComputed;
                     f32 HitDistance = F32Max;
                 
                     u32 HitmMatIndex = 0;
                     v3 NextOrigin = V3(0.0f, 0.0f, 0.0f);
                     v3 NextNormal = V3(0.0f, 0.0f, 0.0f);
                 
-                    ++Queue->BonucesComputed;
+                    ++Result.BouncesComputed;
                 
                     for(u32 PlaneIndex = 0;
                     PlaneIndex < World->PlaneCount;
@@ -232,10 +198,65 @@ renderTile(work_queue *Queue) {
                     break;
                 }
             }
-             
-            FinalColor += Contribution*Color;
-        }
 
+            Result.FinalColor += Contribution*Color;
+        }
+        return Result;
+}
+
+internal b32x
+renderTile(work_queue *Queue) {
+
+    u64 WorkOrderIndex = LockedADDAndReturnPreviousValue(&Queue->NextWorkOrderIndex,1);
+    if (WorkOrderIndex >= Queue->WorkOrderCount) {
+        return false;
+    }
+
+    work_order *Order = Queue->WorkOrders + WorkOrderIndex;
+    world *World =  Order->World;
+
+    random_series State = Order->Entropy;
+
+    image_u32 Image = Order->Image;
+    u32 XMin = Order->XMin;
+    u32 YMin = Order->YMin;
+    u32 OnePastXMax = Order->OnePastXMax;
+    u32 OnePastYMax = Order->OnePastYMax;
+    v3 CameraPosiition = V3(0, -10, 1);
+    v3 CameraZ  = NOZ(CameraPosiition);
+    v3 CameraX = NOZ(Cross(V3(0,0,1),CameraZ));
+    v3 CameraY = NOZ(Cross(CameraZ,CameraX));
+
+    f32 FilmDist = 1.0f;
+    f32 FilmH =  Image.Height > Image.Width ? ((f32)Image.Height/(f32)Image.Width) : 1.0f; // Handling Aspect Ratio
+    f32 FilmW =  Image.Width > Image.Height ? ((f32)Image.Width/(f32)Image.Height) : 1.0f; // Handling Aspect Ratio
+    f32 HalfFilmH = 0.5f*FilmH;
+    f32 HalfFilmW = 0.5f*FilmW;
+    v3 FilmCenter = CameraPosiition - FilmDist * CameraZ;
+    f32 HalfPixW = 1.0f / (f32) Image.Width;
+    f32 HalfPixH = 1.0f / (f32) Image.Height;
+    u32 RaysPerPixel = Queue->RaysPerPixel;
+    u32 MaxBounceCount = Queue->MaxBounceCount;
+    u64 BouncesComputed = 0;
+
+    for(u32 y = YMin;
+        y < OnePastYMax;
+        ++y) {
+        u32 *Out = GetPixelPointer(Image, XMin, y);
+        f32 FilmY = -1.0f + 2.0f*((f32)y/(f32)Image.Height); // Values from [-1,1]
+        for(u32 x = XMin;
+            x < OnePastXMax;
+            ++x) {
+            f32 FilmX = -1.0f + 2.0f*((f32)x/(f32)Image.Width); // Values from [-1,1]
+            
+            cast_result Result = CastSampleRays(World, RaysPerPixel, MaxBounceCount,
+                FilmX, FilmY, HalfPixW, HalfPixH,
+                FilmCenter, HalfFilmW, HalfFilmH, 
+                CameraX, CameraY, CameraPosiition,
+                State);
+
+                BouncesComputed += Result.BouncesComputed;
+                v3 FinalColor = Result.FinalColor;
         v4 BMPColor = {
             255.0f*ExactLinearTosRGB(FinalColor.r),
             255.0f*ExactLinearTosRGB(FinalColor.g),
