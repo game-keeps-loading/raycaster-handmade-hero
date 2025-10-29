@@ -1,140 +1,6 @@
+#pragma once
 #define _CRT_SECURE_NO_DEPRECATE // get rid of microsoft warning for fopen
-#include<stdio.h>
-#include<stdint.h>
-#include<stdlib.h>
-#include"ray_math.h"
-#include<float.h>
-#include<math.h>
-#include<time.h>
-#include <assert.h>
-
-typedef uint8_t u8;
-typedef uint16_t u16;
-typedef uint32_t u32;
-typedef uint64_t u64;
-
-typedef int8_t s8;
-typedef int16_t s16;
-typedef int32_t s32;
-typedef int64_t s64;
-
-typedef s32 b32;
-typedef s32 b32x;
-
-typedef float f32;
-typedef double f64;
-
-#define F32Max FLT_MAX
-#define F32Min FLT_MIN
-#define internal static
-#define global static
-
-#define MAX_WIDTH 3840
-#define MAX_HEIGHT 2160
-#define Pi32 3.14159265359f
-#define Tau32 6.2831853071f
-
-#define ArrayCount(Array) (sizeof(Array)/sizeof(Array[0]))
-
-
-// function to get CPU
-
-#if defined(_WIN32)
-#include <windows.h>
-u32 GetCPUCount() {
-    SYSTEM_INFO sysinfo;
-    GetSystemInfo(&sysinfo);
-    return sysinfo.dwNumberOfProcessors;
-}
-#elif defined(__unix__) || defined(__APPLE__)
-#include <unistd.h>
-u32 GetCPUCount() {
-    long n = sysconf(_SC_NPROCESSORS_ONLN);
-    return (n > 0) ? (unsigned int)n : 1;
-}
-#else
-#include <thread>
-u32 GetCPUCount() {
-    unsigned int n = std::thread::hardware_concurrency();
-    return (n > 0) ? n : 1;
-}
-#endif
-
-//u -> unsigned 
-//s -> signed
-#pragma pack(push, 2)
-struct bitmap_header {
-    u16 FileType;
-    u32 FileSize;
-    u16 Reserved1;
-    u16 Reserved2;
-    u32 BitmapOffset;
-    u32 Size;
-    s32 width;
-    s32 height;
-    u16 Planes;
-    u16 BitsPerPixel;
-    u32 Compression;
-    u32 SizeOfBitmap;
-    s32 HorzResolution;
-    s32 VertResolution;
-    u32 ColorUsed;
-    u32 ColorsImportant;
-};
-#pragma pack(pop)
-
-struct  image_u32 {
-    u32 Width;
-    u32 Height;
-    u32 *Pixels;
-};
-
-struct  material {
-    f32 Scatter; // 0 is pure diffuse 1 is mirror
-    v3 EmitColor;
-    v3 RefColor;
-};
-
-struct plane {
-    v3 N; //vector
-    f32 d;
-    u32 MatIndex;
-};
-
-struct sphere {
-    v3 P; //vector
-    f32 r;
-    u32 MatIndex;
-};
-
-struct world {
-    u32 MaterialCount;
-    material *Materials;
-
-    u32 PlaneCount;
-    plane *Planes;
-
-    u32 SphereCount;
-    sphere *Spheres;
-};
-
-struct work_order {
-    world *World;
-    image_u32 Image;
-    u32 XMin;
-    u32 YMin;
-    u32 OnePastXMax;
-    u32 OnePastYMax;
-};
-
-struct work_queue {
-    u32 WorkOrderCount;
-    work_order *WorkOrders;
-
-    volatile u32 NextWorkOrderIndex;
-    volatile u64 BonucesComputed;
-    volatile u64 TileRetiredCount;
-};
+#include"ray.h"
 
 internal f32
 RandomUnilateral(void) {
@@ -213,12 +79,14 @@ ExactLinearTosRGB(f32 L) {
     return S;
 }
 
-internal void
+
+
+internal b32x
 renderTile(work_queue *Queue) {
-    
-    u32 WorkOrderIndex = Queue->NextWorkOrderIndex++;
+
+    u64 WorkOrderIndex = LockedADDAndReturnPreviousValue(&Queue->NextWorkOrderIndex,1);
     if (WorkOrderIndex >= Queue->WorkOrderCount) {
-        return;
+        return false;
     }
 
     work_order *Order = Queue->WorkOrders + WorkOrderIndex;
@@ -241,7 +109,8 @@ renderTile(work_queue *Queue) {
     v3 FilmCenter = CameraPosiition - FilmDist * CameraZ;
     f32 HalfPixW = 1.0f / (f32) Image.Width;
     f32 HalfPixH = 1.0f / (f32) Image.Height;
-    u32 RaysPerPixel = 16;
+    u32 RaysPerPixel = Queue->RaysPerPixel;
+    u32 MaxBounceCount = Queue->MaxBounceCount;
     u64 BouncesComputed = 0;
 
     for(u32 y = YMin;
@@ -271,7 +140,7 @@ renderTile(work_queue *Queue) {
             f32 Tolerence = 0.0001f;
             // HIT TEST FOR PLANES
             for(u32 BounceCount = 0;
-                BounceCount < 8;
+                BounceCount < MaxBounceCount;
                 ++BounceCount){    
                     ++BouncesComputed;
                     f32 HitDistance = F32Max;
@@ -372,9 +241,13 @@ renderTile(work_queue *Queue) {
         *Out++ = BMPValue;
     }
 }
-        Queue->BonucesComputed += BouncesComputed;
-        ++Queue->TileRetiredCount;
-}
+
+        LockedADDAndReturnPreviousValue(&Queue->BonucesComputed, BouncesComputed);
+        LockedADDAndReturnPreviousValue(&Queue->TileRetiredCount, 1 );
+        return true;
+    }
+
+
 
 int main() {
 
@@ -424,23 +297,26 @@ int main() {
     World.SphereCount = ArrayCount(Sphere);
     World.Spheres = Sphere;
 
-
-    
-    clock_t StartClock = clock();
-
-    // u32 CoreCount = GetCPUCount();
-    u32 CoreCount = 8;
+    u32 CoreCount = GetCPUCount();
+    // u32 CoreCount = 8;
     u32 TileWidth = Image.Width / CoreCount;
     u32 TileHeight = TileWidth;
+    TileWidth = TileHeight = 256;
     u32 TileCountY = (Image.Height + TileHeight - 1)/ TileHeight;
     u32 TileCountX = (Image.Width + TileWidth - 1)/ TileWidth;
     u32 TotalTileCount = TileCountX*TileCountY; // correct
 
-    printf("Raycaster Configuration %d Cores: with %dx%d and Total Tiles: %d (%dk/tile)tiles \n",
-        CoreCount, TileWidth, TileHeight, TotalTileCount , TileWidth*TileHeight*1/256); // 4/1024 
 
     work_queue Queue = {};
     Queue.WorkOrders = (work_order *)malloc(TotalTileCount*sizeof(work_order));
+    Queue.MaxBounceCount = 8;
+    Queue.RaysPerPixel = 1024;
+
+    printf("Raycaster Configuration %d Cores: with %dx%d and Total Tiles: %d (%dk/tile)tiles \n",
+        CoreCount, TileWidth, TileHeight, TotalTileCount , TileWidth*TileHeight*1/256); // 4/1024 
+    
+    printf("Quality is MaxBounces: %d and RaysPerPixel: %d",Queue.MaxBounceCount, Queue.RaysPerPixel);
+
     for(u32 TileY = 0;
         TileY < TileCountY;
         ++TileY) {
@@ -468,14 +344,24 @@ int main() {
 
         assert(Queue.WorkOrderCount == TotalTileCount);
 
+        // memory fencing being done here
+        LockedADDAndReturnPreviousValue(&Queue.NextWorkOrderIndex, 0);
+
+        clock_t StartClock = clock();
+        for(u32 CoreIndex = 1;
+            CoreIndex < CoreCount;
+            ++CoreIndex) {
+                CreateWorkThread(&Queue);
+            }
+
         printf("\n Tiles Retired %lld \n", Queue.TileRetiredCount);
         while (Queue.TileRetiredCount < TotalTileCount) {
-            renderTile(&Queue);
-            printf("Raycasting %lld%% ...   ",100 * Queue.TileRetiredCount / (TileCountY * TileCountX));
-            fflush(stdout);
+            if(renderTile(&Queue))
+            {
+                printf("Raycasting %lld%% ...",100 * Queue.TileRetiredCount / (TileCountY * TileCountX));
+                fflush(stdout);
+            }
         }
-
-    // renderTile(&World, Image, 0, 0, Image.Width,Image.Height);
 
     const char *filename = "test.bmp";
 
@@ -488,7 +374,11 @@ int main() {
     WriteImage(Image, filename);
     
     printf("Raycasting Done....... \n");
-    printf("CPU cores: %u\n", GetCPUCount());
-
     return 0;
 }
+
+#if RAY_WIN32
+#include"win32_ray.cpp"
+#else
+#error "You don't have the header"
+#endif

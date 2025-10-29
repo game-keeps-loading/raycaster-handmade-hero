@@ -1,0 +1,20 @@
+@echo off
+@REM ctime -begin ray.ctm
+
+set CommonCompilerFlags=-O2 -MTd -nologo -fp:fast -Gm- -GR- -EHa- -Zi -Oi
+set CommonCompilerFlags= -D_CRT_SECURE_NO_WARNINGS -DRAY_WIN32=1 %CommonCompilerFlags%
+set CommonLinkerFlags=-incremental -debug user32.lib gdi32.lib winmm.lib opengl32.lib
+
+IF NOT EXIST build mkdir build
+pushd build
+
+cl %CommonCompilerFlags% ../ray.cpp /link %CommonLinkerFlags%
+popd
+
+pushd data
+..\build\ray.exe
+start test.bmp
+popd
+
+@REM ctime -end ray.ctm %LastError%
+

@@ -1,3 +1,4 @@
+#pragma once
 #ifndef HANDMADE_MATH_H
 #define HANDMADE_MATH_H
 
