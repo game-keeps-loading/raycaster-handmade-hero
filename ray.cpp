@@ -221,28 +221,30 @@ CastSampleRays(cast_state *State) {
                         ConditionalAssign(&NextNormal, HitMask, NOZ(t*RayDirection + SphereRelativePosition));   
                 }
                 
+                material Mat = World->Materials[HitMatIndex];
                 
-                if(HitMatIndex) {
-                    material Mat = World->Materials[HitMatIndex];
-                
-                    Color += Hadamard(Attenuation,Mat.EmitColor);
-                
-                    lane_f32 CosAtten = Inner(-RayDirection, NextNormal);
-                    CosAtten = CosAtten < 0 ? 0 : CosAtten;
+                lane_v3 MatEmitColor = Mat.EmitColor; // Must Return 0 on Lane Mask cause it was not hit
+                lane_v3 MatRefColor = Mat.RefColor;
+                f32 MatScatter =  Mat.Scatter;
 
-                    Attenuation = Hadamard(Attenuation, CosAtten*Mat.RefColor);
-                    RayOrigin += HitDistance*RayDirection;
-                    lane_v3 PureBounce = RayDirection - 2.0f*Inner(RayDirection,NextNormal)*NextNormal;
-                    lane_v3 RandomBounce = NOZ(NextNormal + V3(RandomBilateralLane(&Series),
+                Color += Hadamard(Attenuation, MatEmitColor);
+
+                LaneMask = LaneMask & (HitMatIndex == 0);
+                
+                lane_f32 CosAtten = Max(Inner(-RayDirection, NextNormal),0);
+                Attenuation = Hadamard(Attenuation, CosAtten * MatRefColor);
+
+                RayOrigin += HitDistance*RayDirection;
+                
+                lane_v3 PureBounce = RayDirection - 2.0f*Inner(RayDirection,NextNormal)*NextNormal;
+                lane_v3 RandomBounce = NOZ(NextNormal + V3(RandomBilateralLane(&Series),
                                       RandomBilateralLane(&Series), 
                                       RandomBilateralLane(&Series)));
-                    RayDirection = NOZ(Lerp(RandomBounce, Mat.Scatter, PureBounce));
-                } else {
-                    material Mat = World->Materials[HitMatIndex];
-                    Color += Hadamard(Attenuation,Mat.EmitColor);
-                    break;
-                }
+                RayDirection = NOZ(Lerp(RandomBounce, MatScatter, PureBounce));
+
+                if(MaskIsZeroed(LaneMask)) { break; }
             }
+            FinalColor += Contribution*Color;
 
             Result.FinalColor += Contribution*Color;
         }
