@@ -1,6 +1,6 @@
 #pragma once
-#ifndef HANDMADE_MATH_H
-#define HANDMADE_MATH_H
+#ifndef RAY_MATH_H
+#define RAY_MATH_H
 
 #include<math.h>
 #include<stdint.h>
