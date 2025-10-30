@@ -151,9 +151,12 @@ CastSampleRays(cast_state *State) {
                 BounceCount < MaxBounceCount;
                 ++BounceCount){    
                     ++BouncesComputed;
+                    
                     lane_f32 HitDistance = F32Max;
-                
-                    lane_u32 HitmMatIndex = 0;
+                    lane_u32 LaneIncrement = 1;
+                    BouncesComputed += (LaneIncrement & LaneMask);
+
+                    lane_u32 HitMatIndex = 0;
                     lane_v3 NextOrigin = V3(0.0f, 0.0f, 0.0f);
                     lane_v3 NextNormal = V3(0.0f, 0.0f, 0.0f);
                 
@@ -164,57 +167,63 @@ CastSampleRays(cast_state *State) {
                         plane Plane = World->Planes[PlaneIndex];
                         lane_v3 PlaneN = Plane.N;
                         lane_f32 PlaneD = Plane.d;
+                        lane_u32 PlaneMatIndex = Plane.MatIndex;
+                
                         lane_f32 denominator = Inner(PlaneN,RayDirection);
-                        if (( denominator < -Tolerence) ||  (denominator > Tolerence)) {
+                        
                         lane_f32 t = (-PlaneD - Inner(PlaneN, RayOrigin))/denominator;
                         
-                        if((t > MinHitDistance && (t < HitDistance))) {
-                            HitDistance = t;
-                            HitmMatIndex = Plane.MatIndex;
+                        lane_u32 DenomMask = (( denominator < -Tolerence) ||  (denominator > Tolerence));
                         
-                            NextOrigin = RayOrigin + t*RayDirection;
-                            NextNormal = PlaneN;
-                        }
-                    }
+                        lane_u32 tMask = ((t > MinHitDistance && (t < HitDistance)));
+
+                        lane_u32 HitMask = (DenomMask & tMask);
+                        ConditionalAssign(&HitDistance, HitMask, t);
+                        ConditionalAssign(&HitMatIndex, HitMask, PlaneMatIndex);
+                        ConditionalAssign(&NextNormal, HitMask, PlaneN);
                 }
 
                 for(u32 SphereIndex = 0;
                     SphereIndex < World->SphereCount;
-                    ++SphereIndex) {                    
+                    ++SphereIndex) {    
+
                         sphere Sphere = World->Spheres[SphereIndex];
-                        lane_v3 SphereRelativePosition = RayOrigin - Sphere.P;
+                
+                        lane_v3 SphereP = Sphere.P;
+                        lane_f32 Spherer = Sphere.r;
+                        lane_u32  SphereMatIndex = Sphere.MatIndex;
+
+                        lane_v3 SphereRelativePosition = RayOrigin - SphereP;
                         lane_f32 a = Inner(RayDirection,RayDirection);
                         lane_f32 b = 2.0f*Inner(SphereRelativePosition,RayDirection);
-                        lane_f32 c = Inner(SphereRelativePosition, SphereRelativePosition) - Sphere.r*Sphere.r;
+                        lane_f32 c = Inner(SphereRelativePosition, SphereRelativePosition) - Spherer*Spherer;
                     
                         lane_f32 denominator = 2.0f*a;
                         lane_f32 RootTerm = SquareRoot(b*b - 4.0f*a*c);
-                    
-                        if (RootTerm > Tolerence) {
                         
                         lane_f32 tp = (-b + RootTerm) / denominator;
-                        lane_f32 tn = (-b - RootTerm) / denominator;
+                        lane_f32 tn = (-b - RootTerm) / denominator;                    
                         
+                        lane_u32 RootMask =  (RootTerm > Tolerence);
+
                         lane_f32 t = tp;
                         
-                        if ((tn > MinHitDistance) && (tn < tp)) {
-                            t = tn;
-                        }
-                    
-                        if(((t > MinHitDistance) && (t < HitDistance))) {
-                            HitDistance = t;
-                            HitmMatIndex = Sphere.MatIndex;
+                        lane_u32 PickMask = ((tn > MinHitDistance) && (tn < tp));
+                        
+                        ConditionalAssign(&t, PickMask, tn);
 
-                            // NextOrigin += HitDistance * RayDirection;
-                            NextOrigin = RayOrigin - t*RayDirection;
-                            NextNormal = NOZ(t*RayDirection + SphereRelativePosition);
-                        }
-                    }
+                    
+                        lane_u32 tMask = (((t > MinHitDistance) && (t < HitDistance)));
+                        lane_u32 HitMask = (RootMask & tMask);
+
+                        ConditionalAssign(&HitDistance, HitMask, t);
+                        ConditionalAssign(&HitMatIndex, HitMask, SphereMatIndex);
+                        ConditionalAssign(&NextNormal, HitMask, NOZ(t*RayDirection + SphereRelativePosition));   
                 }
                 
                 
-                if(HitmMatIndex) {
-                    material Mat = World->Materials[HitmMatIndex];
+                if(HitMatIndex) {
+                    material Mat = World->Materials[HitMatIndex];
                 
                     Color += Hadamard(Attenuation,Mat.EmitColor);
                 
@@ -229,7 +238,7 @@ CastSampleRays(cast_state *State) {
                                       RandomBilateralLane(&Series)));
                     RayDirection = NOZ(Lerp(RandomBounce, Mat.Scatter, PureBounce));
                 } else {
-                    material Mat = World->Materials[HitmMatIndex];
+                    material Mat = World->Materials[HitMatIndex];
                     Color += Hadamard(Attenuation,Mat.EmitColor);
                     break;
                 }
@@ -237,6 +246,7 @@ CastSampleRays(cast_state *State) {
 
             Result.FinalColor += Contribution*Color;
         }
+
         State-> BouncesComputed += BouncesComputed;
         State->FinalColor = Result.FinalColor;
 }

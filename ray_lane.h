@@ -24,34 +24,34 @@ ConditionalAssign(lane_v3 *Dest, lane_u32 Mask, lane_v3 Source ) {
     ConditionalAssign(&Dest->z, Mask,Source.z);
 }
 
-internal lane_f32
-Max(lane_f32 A, lane_f32 B) {
-    return A > B ? A : B;
-}
+// internal lane_f32
+// Max(lane_f32 A, lane_f32 B) {
+//     return A > B ? A : B;
+// }
 
-internal b32x 
-MaskIsZeroed(lane_u32 LaneMask) {
-    return LaneMask == 0;
-}
+// internal b32x 
+// MaskIsZeroed(lane_u32 LaneMask) {
+//     return LaneMask == 0;
+// }
 
-internal u32
-HorizontalAdd(lane_u32 A) {
-    return A;
-}
+// internal u32
+// HorizontalAdd(lane_u32 A) {
+//     return A;
+// }
 
-internal f32
-HorizontalAdd(lane_f32 A) {
-    return A;
-}
+// internal f32
+// HorizontalAdd(lane_f32 A) {
+//     return A;
+// }
 
-internal v3
-HorizontalAdd(lane_v3 A) { 
-    v3 Result = {
-        HorizontalAdd(A.x),
-        HorizontalAdd(A.y),
-        HorizontalAdd(A.z)
-    };
+// internal v3
+// HorizontalAdd(lane_v3 A) { 
+//     v3 Result = {
+//         HorizontalAdd(A.x),
+//         HorizontalAdd(A.y),
+//         HorizontalAdd(A.z)
+//     };
 
-    return Result;
-}
+//     return Result;
+// }
 #endif
