@@ -126,7 +126,7 @@ CastSampleRays(cast_state *State) {
     lane_v3 CameraPosiition = State->CameraPosiition;
 
     random_series Series = State->Series;
-    v3 FinalColor = State->FinalColor;
+    lane_v3 FinalColor = {};
 
     cast_state Result = {};
     f32 Contribution = 1.0f/(f32)RaysPerPixel;
@@ -229,13 +229,13 @@ CastSampleRays(cast_state *State) {
 
                 Color += Hadamard(Attenuation, MatEmitColor);
 
-                LaneMask = LaneMask & (HitMatIndex == 0);
+                LaneMask  &= (HitMatIndex != 0);
                 
                 lane_f32 CosAtten = Max(Inner(-RayDirection, NextNormal),0);
                 Attenuation = Hadamard(Attenuation, CosAtten * MatRefColor);
 
                 RayOrigin += HitDistance*RayDirection;
-                
+
                 lane_v3 PureBounce = RayDirection - 2.0f*Inner(RayDirection,NextNormal)*NextNormal;
                 lane_v3 RandomBounce = NOZ(NextNormal + V3(RandomBilateralLane(&Series),
                                       RandomBilateralLane(&Series), 
@@ -244,13 +244,12 @@ CastSampleRays(cast_state *State) {
 
                 if(MaskIsZeroed(LaneMask)) { break; }
             }
-            FinalColor += Contribution*Color;
 
-            Result.FinalColor += Contribution*Color;
+            FinalColor += Contribution*Color;
         }
 
-        State-> BouncesComputed += BouncesComputed;
-        State->FinalColor = Result.FinalColor;
+        State-> BouncesComputed += HorizontalAdd(BouncesComputed);
+        State->FinalColor = HorizontalAdd(FinalColor);
 }
 
 internal b32x

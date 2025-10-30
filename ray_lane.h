@@ -1,6 +1,14 @@
 #ifndef RAY_LANE_H
 #define RAY_LANE_H
+
 #include"ray.h"
+
+#define LANE_WIDTH 1
+
+#if ((LANE_WIDTH == 4))
+
+
+#elif ((LANE_WIDTH == 1 ))
 
 typedef f32 lane_f32;
 typedef u32 lane_u32;
@@ -54,4 +62,7 @@ HorizontalAdd(lane_v3 A) {
 
     return Result;
 }
+#else
+#error Lane Width must be set to 1 to 4:
+#endif
 #endif
