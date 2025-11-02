@@ -4,11 +4,10 @@
 #include<stdio.h>
 #include<stdint.h>
 #include<stdlib.h>
-#include"ray_math.h"
 #include<float.h>
 #include<math.h>
 #include<time.h>
-#include <assert.h>
+#include<assert.h>
 #include<windows.h>
 
 typedef uint8_t u8;
@@ -39,9 +38,6 @@ typedef double f64;
 #define Tau32 6.2831853071f
 
 #define ArrayCount(Array) (sizeof(Array)/sizeof(Array[0]))
-
-
-
 
 //u -> unsigned 
 //s -> signed
@@ -125,6 +121,31 @@ struct work_queue {
     volatile u64 NextWorkOrderIndex;
     volatile u64 BonucesComputed;
     volatile u64 TileRetiredCount;
+};
+
+
+struct cast_state {
+    world *World;
+    u32 RaysPerPixel;
+    u32 MaxBounceCount;
+        
+    f32 FilmX;
+    f32 FilmY;
+    f32 HalfPixW;
+    f32 HalfPixH;
+        
+    v3  FilmCenter;
+    f32 HalfFilmW;
+    f32 HalfFilmH;
+    
+    v3  CameraX;
+    v3  CameraY;
+    v3  CameraZ;
+    v3  CameraPosiition;
+
+    random_series Series;
+    v3  FinalColor;
+    u64 BouncesComputed;
 };
 
 u32 xorshift32(random_series *Series) {

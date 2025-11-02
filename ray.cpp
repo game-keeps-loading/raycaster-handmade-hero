@@ -1,7 +1,6 @@
-#pragma once
 #define _CRT_SECURE_NO_DEPRECATE // get rid of microsoft warning for fopen
 #include"ray.h"
-#include"ray_lane.h"
+#include"ray_math.h"
 
 internal f32
 RandomUnilateral(random_series *State) {
@@ -10,9 +9,8 @@ RandomUnilateral(random_series *State) {
 
 internal lane_f32
 RandomBilateralLane(random_series *State) {
-    return -1.0f + 2.0f*RandomUnilateral(State);
+    return LaneF32FromF32(-1.0f) + LaneF32FromF32(2.0f*RandomUnilateral(State));
 }
-
 
 internal u32 GetTotalPixelSize(image_u32 Image) {
     return sizeof(u32)*Image.Width*Image.Height;
@@ -80,57 +78,38 @@ ExactLinearTosRGB(f32 L) {
     return S;
 }
 
-struct cast_state {
-    world *World;
-    u32 RaysPerPixel;
-    u32 MaxBounceCount;
-        
-    f32 FilmX;
-    f32 FilmY;
-    f32 HalfPixW;
-    f32 HalfPixH;
-        
-    v3 FilmCenter;
-    f32 HalfFilmW;
-    f32 HalfFilmH;
-    
-    v3 CameraX;
-    v3 CameraY;
-    v3 CameraZ;
-    v3 CameraPosiition;
-
-    random_series Series;
-    v3 FinalColor;
-    u64 BouncesComputed;
-};
-
 internal void 
 CastSampleRays(cast_state *State) {
 
     world *World = State->World;
-    lane_u32 RaysPerPixel = State->RaysPerPixel;
-    lane_u32 MaxBounceCount = State->MaxBounceCount;
-        
-    lane_f32 FilmX = State->FilmX;
-    lane_f32 FilmY = State->FilmY;
-    lane_f32 HalfPixW = State->HalfPixW;
-    lane_f32 HalfPixH = State->HalfPixH;
-        
-    lane_v3 FilmCenter = State->FilmCenter;
-    lane_f32 HalfFilmW = State->HalfFilmW;
-    lane_f32 HalfFilmH = State->HalfFilmH;
+    u32 RaysPerPixel = State->RaysPerPixel;
+    u32 MaxBounceCount = State->MaxBounceCount;
+
+    lane_f32 HalfPixW = LaneF32FromF32(State->HalfPixW);
+    lane_f32 HalfPixH = LaneF32FromF32(State->HalfPixH);
     
-    lane_v3 CameraX = State->CameraX;
-    lane_v3 CameraY = State->CameraY;
-    lane_v3 CameraZ = State->CameraZ;
-    lane_v3 CameraPosiition = State->CameraPosiition;
+    lane_f32 FilmX = LaneF32FromF32(State->FilmX) + HalfPixW;
+    lane_f32 FilmY = LaneF32FromF32(State->FilmY) + HalfPixH;
+
+    lane_v3 FilmCenter = LaneV3FromV3(State->FilmCenter);
+    lane_f32 HalfFilmW = LaneF32FromF32(State->HalfFilmW);
+    lane_f32 HalfFilmH = LaneF32FromF32(State->HalfFilmH);
+    
+    lane_v3 CameraX = LaneV3FromV3(State->CameraX);
+    lane_v3 CameraY = LaneV3FromV3(State->CameraY);
+    lane_v3 CameraZ = LaneV3FromV3(State->CameraZ);
+    lane_v3 CameraPosiition = LaneV3FromV3(State->CameraPosiition);
 
     random_series Series = State->Series;
     lane_v3 FinalColor = {};
 
-    cast_state Result = {};
-    f32 Contribution = 1.0f/(f32)RaysPerPixel;
-    lane_u32 BouncesComputed = 0;
+    // cast_state Result = {};
+    u32 LaneWidth = LANE_WIDTH;
+    u32 LaneRayCount = RaysPerPixel/ LaneWidth;
+
+    assert((LaneRayCount*LaneWidth) == RaysPerPixel);
+    f32 Contribution = 1.0f/(f32)(RaysPerPixel);
+    u32 BouncesComputed = 0;
     for(u32 RayIndex = 0;
         RayIndex <RaysPerPixel;
         ++RayIndex) {
@@ -141,10 +120,10 @@ CastSampleRays(cast_state *State) {
                     lane_v3 RayDirection = NOZ(FilmP - CameraPosiition);
             
             lane_v3 Color = {};
-            lane_v3 Attenuation = V3(1.0f, 1.0f, 1.0f);
-            lane_f32 MinHitDistance = 0.001f;
-            lane_f32 Tolerence = 0.0001f;
-            lane_u32 LaneMask = 0xFFFFFFFF;
+            lane_v3 Attenuation = LaneV3FromV3(V3(1.0f, 1.0f, 1.0f));
+            lane_f32 MinHitDistance = LaneF32FromF32(0.001f);
+            lane_f32 Tolerence = LaneF32FromF32(0.0001f);
+            lane_u32 LaneMask = LaneU32FromU32(0xFFFFFFFF);
     
             // HIT TEST FOR PLANES
             for(u32 BounceCount = 0;
@@ -152,30 +131,30 @@ CastSampleRays(cast_state *State) {
                 ++BounceCount){    
                     ++BouncesComputed;
                     
-                    lane_f32 HitDistance = F32Max;
-                    lane_u32 LaneIncrement = 1;
+                    lane_f32 HitDistance = LaneF32FromF32(F32Max);
+                    lane_u32 LaneIncrement = LaneU32FromU32(1);
                     BouncesComputed += (LaneIncrement & LaneMask);
 
-                    lane_u32 HitMatIndex = 0;
-                    lane_v3 NextOrigin = V3(0.0f, 0.0f, 0.0f);
-                    lane_v3 NextNormal = V3(0.0f, 0.0f, 0.0f);
+                    lane_u32 HitMatIndex = LaneU32FromU32(0);
+                    lane_v3 NextOrigin = LaneV3FromV3(V3(0.0f, 0.0f, 0.0f));
+                    lane_v3 NextNormal = LaneV3FromV3(V3(0.0f, 0.0f, 0.0f));
                 
                     for(u32 PlaneIndex = 0;
                     PlaneIndex < World->PlaneCount;
                     ++PlaneIndex) {
                     
                         plane Plane = World->Planes[PlaneIndex];
-                        lane_v3 PlaneN = Plane.N;
-                        lane_f32 PlaneD = Plane.d;
-                        lane_u32 PlaneMatIndex = Plane.MatIndex;
+                        lane_v3 PlaneN = LaneV3FromV3(Plane.N);
+                        lane_f32 PlaneD = LaneF32FromF32(Plane.d);
+                        lane_u32 PlaneMatIndex = LaneU32FromU32(Plane.MatIndex);
                 
                         lane_f32 denominator = Inner(PlaneN,RayDirection);
                         
                         lane_f32 t = (-PlaneD - Inner(PlaneN, RayOrigin))/denominator;
                         
-                        lane_u32 DenomMask = (( denominator < -Tolerence) ||  (denominator > Tolerence));
+                        lane_u32 DenomMask = (( denominator < -Tolerence) |  (denominator > Tolerence));
                         
-                        lane_u32 tMask = ((t > MinHitDistance && (t < HitDistance)));
+                        lane_u32 tMask = ((t > MinHitDistance & (t < HitDistance)));
 
                         lane_u32 HitMask = (DenomMask & tMask);
                         ConditionalAssign(&HitDistance, HitMask, t);
@@ -189,9 +168,9 @@ CastSampleRays(cast_state *State) {
 
                         sphere Sphere = World->Spheres[SphereIndex];
                 
-                        lane_v3 SphereP = Sphere.P;
-                        lane_f32 Spherer = Sphere.r;
-                        lane_u32  SphereMatIndex = Sphere.MatIndex;
+                        lane_v3 SphereP = LaneV3FromV3(Sphere.P);
+                        lane_f32 Spherer = LaneF32FromF32(Sphere.r);
+                        lane_u32  SphereMatIndex = LaneU32FromU32(Sphere.MatIndex);
 
                         lane_v3 SphereRelativePosition = RayOrigin - SphereP;
                         lane_f32 a = Inner(RayDirection,RayDirection);
@@ -208,38 +187,37 @@ CastSampleRays(cast_state *State) {
 
                         lane_f32 t = tp;
                         
-                        lane_u32 PickMask = ((tn > MinHitDistance) && (tn < tp));
+                        lane_u32 PickMask = ((tn > MinHitDistance) & (tn < tp));
                         
                         ConditionalAssign(&t, PickMask, tn);
 
                     
-                        lane_u32 tMask = (((t > MinHitDistance) && (t < HitDistance)));
+                        lane_u32 tMask = (((t > MinHitDistance) & (t < HitDistance)));
                         lane_u32 HitMask = (RootMask & tMask);
 
                         ConditionalAssign(&HitDistance, HitMask, t);
                         ConditionalAssign(&HitMatIndex, HitMask, SphereMatIndex);
                         ConditionalAssign(&NextNormal, HitMask, NOZ(t*RayDirection + SphereRelativePosition));   
                 }
-                
-                material Mat = World->Materials[HitMatIndex];
-                
-                lane_v3 MatEmitColor = Mat.EmitColor; // Must Return 0 on Lane Mask cause it was not hit
-                lane_v3 MatRefColor = Mat.RefColor;
-                f32 MatScatter =  Mat.Scatter;
+
+                // n way load
+                lane_v3 MatEmitColor = LaneMask & (GatherV3(World, HitMatIndex , Mat.EmitColor)); // Must Return 0 on Lane Mask cause it was not hit
+                lane_v3 MatRefColor = GatherV3(World->Materials, HitMatIndex , Mat.RefColor);
+                lane_f32 MatScatter =  GatherF32(Mat.Scatter);
 
                 Color += Hadamard(Attenuation, MatEmitColor);
-
-                LaneMask  &= (HitMatIndex != 0);
+                LaneMask  &= (HitMatIndex != LaneU32FromU32(0));
                 
-                lane_f32 CosAtten = Max(Inner(-RayDirection, NextNormal),0);
+                lane_f32 CosAtten = (Max(Inner(-RayDirection, NextNormal),LaneF32FromF32(0.0f)));
                 Attenuation = Hadamard(Attenuation, CosAtten * MatRefColor);
 
                 RayOrigin += HitDistance*RayDirection;
 
                 lane_v3 PureBounce = RayDirection - 2.0f*Inner(RayDirection,NextNormal)*NextNormal;
-                lane_v3 RandomBounce = NOZ(NextNormal + V3(RandomBilateralLane(&Series),
-                                      RandomBilateralLane(&Series), 
-                                      RandomBilateralLane(&Series)));
+                lane_v3 RandomBounce = NOZ(NextNormal + 
+                                           Lane_V3(RandomBilateralLane(&Series),
+                                           RandomBilateralLane(&Series), 
+                                           RandomBilateralLane(&Series)));
                 RayDirection = NOZ(Lerp(RandomBounce, MatScatter, PureBounce));
 
                 if(MaskIsZeroed(LaneMask)) { break; }
@@ -457,7 +435,7 @@ int main() {
     return 0;
 }
 
-#if RAY_WIN32
+#if (RAY_WIN32 || 1)
 #include"win32_ray.cpp"
 #else
 #error "You don't have the header"
