@@ -1,3 +1,4 @@
+// #pragma once
 #ifndef RAY_H
 #define RAY_H
 
@@ -41,6 +42,12 @@ typedef double f64;
 
 //u -> unsigned 
 //s -> signed
+// only for storage
+struct v3 {
+    f32 x,y,z;
+};
+
+
 #pragma pack(push, 2)
 struct bitmap_header {
     u16 FileType;
@@ -70,8 +77,8 @@ struct  image_u32 {
 
 struct  material {
     f32 Scatter; // 0 is pure diffuse 1 is mirror
-    v3 EmitColor;
     v3 RefColor;
+    v3 EmitColor;
 };
 
 struct plane {
@@ -97,65 +104,6 @@ struct world {
     sphere *Spheres;
 };
 
-struct random_series {
-    u32 State;
-};
-
-struct work_order {
-    world *World;
-    image_u32 Image;
-    u32 XMin;
-    u32 YMin;
-    u32 OnePastXMax;
-    u32 OnePastYMax;
-
-    random_series Entropy;
-};
-
-struct work_queue {
-    u32 WorkOrderCount;
-    work_order *WorkOrders;
-    u32 RaysPerPixel;
-    u32 MaxBounceCount;
-
-    volatile u64 NextWorkOrderIndex;
-    volatile u64 BonucesComputed;
-    volatile u64 TileRetiredCount;
-};
-
-
-struct cast_state {
-    world *World;
-    u32 RaysPerPixel;
-    u32 MaxBounceCount;
-        
-    f32 FilmX;
-    f32 FilmY;
-    f32 HalfPixW;
-    f32 HalfPixH;
-        
-    v3  FilmCenter;
-    f32 HalfFilmW;
-    f32 HalfFilmH;
-    
-    v3  CameraX;
-    v3  CameraY;
-    v3  CameraZ;
-    v3  CameraPosiition;
-
-    random_series Series;
-    v3  FinalColor;
-    u64 BouncesComputed;
-};
-
-u32 xorshift32(random_series *Series) {
-	/* Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs" */
-	u32 x = Series->State;
-	x ^= x << 13;
-	x ^= x >> 17;
-	x ^= x << 5;
-    return Series->State=x;
-}
 
 #if defined(_WIN32)
 u32 GetCPUCount() {

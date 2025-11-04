@@ -2,14 +2,81 @@
 #include"ray.h"
 #include"ray_math.h"
 
-internal f32
-RandomUnilateral(random_series *State) {
-    return ((f32)xorshift32(State)/ (f32)U32Max);
+// TODO these Struct are here for resolving cicrular dependency 
+
+struct random_series {
+    lane_u32 State;
+};
+
+struct work_order {
+    world *World;
+    image_u32 Image;
+    u32 XMin;
+    u32 YMin;
+    u32 OnePastXMax;
+    u32 OnePastYMax;
+
+    random_series Entropy;
+};
+
+
+struct work_queue {
+    u32 WorkOrderCount;
+    work_order *WorkOrders;
+    u32 RaysPerPixel;
+    u32 MaxBounceCount;
+
+    volatile u64 NextWorkOrderIndex;
+    volatile u64 BonucesComputed;
+    volatile u64 TileRetiredCount;
+};
+
+struct cast_state {
+    world *World;
+    u32 RaysPerPixel;
+    u32 MaxBounceCount;
+        
+    f32 FilmX;
+    f32 FilmY;
+    f32 HalfPixW;
+    f32 HalfPixH;
+        
+    v3  FilmCenter;
+    f32 HalfFilmW;
+    f32 HalfFilmH;
+    
+    v3  CameraX;
+    v3  CameraY;
+    v3  CameraZ;
+    v3  CameraPosiition;
+
+    random_series Series;
+    v3  FinalColor;
+    u64 BouncesComputed;
+};
+
+
+//
+internal lane_u32 xorshift32(random_series *Series) {
+	/* Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs" */
+	lane_u32 x = Series->State;
+	x ^= x << 13;
+	x ^= x >> 17;
+	x ^= x << 5;
+     Series->State=x;
+    
+     return x;
 }
 
 internal lane_f32
-RandomBilateralLane(random_series *State) {
-    return LaneF32FromF32(-1.0f) + LaneF32FromF32(2.0f*RandomUnilateral(State));
+RandomUnilateral(random_series *Series) {
+    lane_f32 Result = LaneF32FromLaneU32(xorshift32(Series)) / LaneF32FromU32(U32Max);
+    return Result;
+}
+
+internal lane_f32
+RandomBilateralLane(random_series *Series) {
+    return LaneF32FromF32(-1.0f) + 2.0f*RandomUnilateral(Series);
 }
 
 internal u32 GetTotalPixelSize(image_u32 Image) {
@@ -81,61 +148,61 @@ ExactLinearTosRGB(f32 L) {
 internal void 
 CastSampleRays(cast_state *State) {
 
-    world *World = State->World;
-    u32 RaysPerPixel = State->RaysPerPixel;
-    u32 MaxBounceCount = State->MaxBounceCount;
+    world *World = State->World; //correct
+    u32 RaysPerPixel = State->RaysPerPixel; //correct
+    u32 MaxBounceCount = State->MaxBounceCount; //correct
 
-    lane_f32 HalfPixW = LaneF32FromF32(State->HalfPixW);
-    lane_f32 HalfPixH = LaneF32FromF32(State->HalfPixH);
+    lane_f32 HalfPixW = LaneF32FromF32(State->HalfPixW); //correct
+    lane_f32 HalfPixH = LaneF32FromF32(State->HalfPixH); //correct
     
-    lane_f32 FilmX = LaneF32FromF32(State->FilmX) + HalfPixW;
-    lane_f32 FilmY = LaneF32FromF32(State->FilmY) + HalfPixH;
+    lane_f32 FilmX = State->FilmX + HalfPixW; //correct
+    lane_f32 FilmY = State->FilmY + HalfPixH; //correct
 
-    lane_v3 FilmCenter = LaneV3FromV3(State->FilmCenter);
-    lane_f32 HalfFilmW = LaneF32FromF32(State->HalfFilmW);
-    lane_f32 HalfFilmH = LaneF32FromF32(State->HalfFilmH);
+    lane_v3 FilmCenter = LaneV3FromV3(State->FilmCenter); //correct
+    lane_f32 HalfFilmW = LaneF32FromF32(State->HalfFilmW); //correct
+    lane_f32 HalfFilmH = LaneF32FromF32(State->HalfFilmH); //correct
     
-    lane_v3 CameraX = LaneV3FromV3(State->CameraX);
-    lane_v3 CameraY = LaneV3FromV3(State->CameraY);
-    lane_v3 CameraZ = LaneV3FromV3(State->CameraZ);
-    lane_v3 CameraPosiition = LaneV3FromV3(State->CameraPosiition);
+    lane_v3 CameraX = LaneV3FromV3(State->CameraX); //correct
+    lane_v3 CameraY = LaneV3FromV3(State->CameraY); //correct
+    lane_v3 CameraZ = LaneV3FromV3(State->CameraZ); //correct 
+    lane_v3 CameraPosiition = LaneV3FromV3(State->CameraPosiition); //correct
 
     random_series Series = State->Series;
     lane_v3 FinalColor = {};
 
     // cast_state Result = {};
     u32 LaneWidth = LANE_WIDTH;
-    u32 LaneRayCount = RaysPerPixel/ LaneWidth;
-
+    u32 LaneRayCount = RaysPerPixel / LaneWidth;
     assert((LaneRayCount*LaneWidth) == RaysPerPixel);
+    
     f32 Contribution = 1.0f/(f32)(RaysPerPixel);
-    u32 BouncesComputed = 0;
+    lane_u32 BouncesComputed = LaneU32FromU32(0);
     for(u32 RayIndex = 0;
         RayIndex <RaysPerPixel;
         ++RayIndex) {
-                    lane_f32 Offx = FilmX + RandomBilateralLane(&Series) * HalfPixW;
-                    lane_f32 Offy = FilmY + RandomBilateralLane(&Series) * HalfPixH; 
-                    lane_v3 FilmP =  FilmCenter + Offx*HalfFilmW*CameraX + Offy*HalfFilmH*CameraY;
-                    lane_v3 RayOrigin = CameraPosiition;
-                    lane_v3 RayDirection = NOZ(FilmP - CameraPosiition);
+                    lane_f32 Offx = FilmX + RandomBilateralLane(&Series) * HalfPixW; //correct
+                    lane_f32 Offy = FilmY + RandomBilateralLane(&Series) * HalfPixH;  //correct
+                    lane_v3 FilmP =  FilmCenter + Offx*HalfFilmW*CameraX + Offy*HalfFilmH*CameraY; //correct
+                    lane_v3 RayOrigin = CameraPosiition; //correct
+                    lane_v3 RayDirection = NOZ(FilmP - CameraPosiition); //correct
             
             lane_v3 Color = {};
-            lane_v3 Attenuation = LaneV3FromV3(V3(1.0f, 1.0f, 1.0f));
-            lane_f32 MinHitDistance = LaneF32FromF32(0.001f);
-            lane_f32 Tolerence = LaneF32FromF32(0.0001f);
-            lane_u32 LaneMask = LaneU32FromU32(0xFFFFFFFF);
+            lane_v3 Attenuation = LaneV3FromV3(V3(1.0f, 1.0f, 1.0f)); //correct
+            lane_f32 MinHitDistance = LaneF32FromF32(0.001f); //correct
+            lane_f32 Tolerence = LaneF32FromF32(0.0001f); //correct
+            lane_u32 LaneMask = LaneU32FromU32(0xFFFFFFFF); //correct
     
             // HIT TEST FOR PLANES
             for(u32 BounceCount = 0;
                 BounceCount < MaxBounceCount;
                 ++BounceCount){    
-                    ++BouncesComputed;
                     
-                    lane_f32 HitDistance = LaneF32FromF32(F32Max);
-                    lane_u32 LaneIncrement = LaneU32FromU32(1);
-                    BouncesComputed += (LaneIncrement & LaneMask);
+                    lane_f32 HitDistance = LaneF32FromF32(F32Max); //correct
+                    lane_u32 HitMatIndex = LaneU32FromU32(0); //correct
+                    lane_u32 LaneIncrement = LaneU32FromU32(1); //correct 
+                    BouncesComputed += (LaneIncrement & LaneMask); //correct
 
-                    lane_u32 HitMatIndex = LaneU32FromU32(0);
+                   
                     lane_v3 NextOrigin = LaneV3FromV3(V3(0.0f, 0.0f, 0.0f));
                     lane_v3 NextNormal = LaneV3FromV3(V3(0.0f, 0.0f, 0.0f));
                 
@@ -149,12 +216,9 @@ CastSampleRays(cast_state *State) {
                         lane_u32 PlaneMatIndex = LaneU32FromU32(Plane.MatIndex);
                 
                         lane_f32 denominator = Inner(PlaneN,RayDirection);
-                        
                         lane_f32 t = (-PlaneD - Inner(PlaneN, RayOrigin))/denominator;
-                        
                         lane_u32 DenomMask = (( denominator < -Tolerence) |  (denominator > Tolerence));
-                        
-                        lane_u32 tMask = ((t > MinHitDistance & (t < HitDistance)));
+                        lane_u32 tMask = ((t > MinHitDistance) & (t < HitDistance));
 
                         lane_u32 HitMask = (DenomMask & tMask);
                         ConditionalAssign(&HitDistance, HitMask, t);
@@ -173,8 +237,8 @@ CastSampleRays(cast_state *State) {
                         lane_u32  SphereMatIndex = LaneU32FromU32(Sphere.MatIndex);
 
                         lane_v3 SphereRelativePosition = RayOrigin - SphereP;
-                        lane_f32 a = Inner(RayDirection,RayDirection);
-                        lane_f32 b = 2.0f*Inner(SphereRelativePosition,RayDirection);
+                        lane_f32 a = Inner(RayDirection, RayDirection);
+                        lane_f32 b = 2.0f*Inner(SphereRelativePosition, RayDirection);
                         lane_f32 c = Inner(SphereRelativePosition, SphereRelativePosition) - Spherer*Spherer;
                     
                         lane_f32 denominator = 2.0f*a;
@@ -201,9 +265,9 @@ CastSampleRays(cast_state *State) {
                 }
 
                 // n way load
-                lane_v3 MatEmitColor = LaneMask & (GatherV3(World, HitMatIndex , Mat.EmitColor)); // Must Return 0 on Lane Mask cause it was not hit
-                lane_v3 MatRefColor = GatherV3(World->Materials, HitMatIndex , Mat.RefColor);
-                lane_f32 MatScatter =  GatherF32(Mat.Scatter);
+                lane_v3 MatEmitColor = LaneMask & (GatherV3(World->Materials, HitMatIndex , EmitColor)); // Must Return 0 on Lane Mask cause it was not hit
+                lane_v3 MatRefColor = GatherV3(World->Materials, HitMatIndex , RefColor);
+                lane_f32 MatScatter =  GatherF32(World->Materials, HitMatIndex, Scatter);
 
                 Color += Hadamard(Attenuation, MatEmitColor);
                 LaneMask  &= (HitMatIndex != LaneU32FromU32(0));
@@ -251,21 +315,23 @@ renderTile(work_queue *Queue) {
     u32 OnePastXMax = Order->OnePastXMax;
     u32 OnePastYMax = Order->OnePastYMax;
     
-    State.CameraPosiition = V3(0, -10, 1);
-    State.CameraPosiition = V3(0, -10, 1);
-    State.CameraZ  = NOZ(State.CameraPosiition);
-    State.CameraPosiition = V3(0, -10, 1);
-    State.CameraX = NOZ(Cross(V3(0,0,1),State.CameraZ));
-    State.CameraPosiition = V3(0, -10, 1);
-    State.CameraPosiition = V3(0, -10, 1);
-    State.CameraY = NOZ(Cross(State.CameraZ,State.CameraX));
-
     f32 FilmDist = 1.0f;
     f32 FilmH =  Image.Height > Image.Width ? ((f32)Image.Height/(f32)Image.Width) : 1.0f; // Handling Aspect Ratio
     f32 FilmW =  Image.Width > Image.Height ? ((f32)Image.Width/(f32)Image.Height) : 1.0f; // Handling Aspect Ratio
+
+    lane_v3 CameraPosiition = V3FromFLoat(0, -10, 1);
+    lane_v3 CameraZ  = NOZ(CameraPosiition);
+    lane_v3 CameraX = NOZ(Cross(V3FromFLoat(0,0,1), CameraZ));
+    lane_v3 CameraY = NOZ(Cross(CameraZ,CameraX));
+    lane_v3 FilmCenter =  CameraPosiition - FilmDist * CameraZ;
+    State.CameraPosiition = Extract0(CameraPosiition);
+    State.CameraX =  Extract0(CameraX);
+    State.CameraY =  Extract0(CameraY);
+    State.CameraZ =  Extract0(CameraZ);
+
     State.HalfFilmH = 0.5f*FilmH;
     State.HalfFilmW = 0.5f*FilmW;
-    State.FilmCenter = State.CameraPosiition - FilmDist * State.CameraZ;
+    State.FilmCenter = Extract0(FilmCenter);
     State.HalfPixW = 1.0f / (f32) Image.Width;
     State.HalfPixH = 1.0f / (f32) Image.Height;
     State.RaysPerPixel = Queue->RaysPerPixel;
@@ -287,9 +353,9 @@ renderTile(work_queue *Queue) {
             v3 FinalColor = State.FinalColor;
         
             v4 BMPColor = {
-            255.0f*ExactLinearTosRGB(FinalColor.r),
-            255.0f*ExactLinearTosRGB(FinalColor.g),
-            255.0f*ExactLinearTosRGB(FinalColor.b),
+            255.0f*ExactLinearTosRGB(FinalColor.x),
+            255.0f*ExactLinearTosRGB(FinalColor.y),
+            255.0f*ExactLinearTosRGB(FinalColor.z),
             255.0f
         };
         u32 BMPValue = BGRAPack4x8(BMPColor);
@@ -314,7 +380,7 @@ int main() {
     Materials[0].EmitColor = V3(0.3f, 0.4f, 0.5f);
     Materials[1].RefColor = V3(0.5f, 0.5f, 0.5f);
     Materials[2].RefColor = V3(0.7f, 0.5f, 0.3f);
-    Materials[3].EmitColor = V3(7.0f, 0.0f, 0.0f);
+    Materials[3].EmitColor = V3(4.0f, 0.0f, 0.0f);
     Materials[4].RefColor = V3(0.2f, 0.8f, 0.2f);
     Materials[4].Scatter = 0.7f;
     Materials[5].RefColor = V3(0.4f, 0.8f, 0.9f);
@@ -353,7 +419,6 @@ int main() {
     World.Spheres = Sphere;
 
     u32 CoreCount = GetCPUCount();
-    // u32 CoreCount = 8;
     u32 TileWidth = Image.Width / CoreCount;
     u32 TileHeight = TileWidth;
     TileWidth = TileHeight = 64;
@@ -367,8 +432,8 @@ int main() {
     Queue.MaxBounceCount = 8;
     Queue.RaysPerPixel = 1024;
 
-    printf("Raycaster Configuration %d Cores: with %dx%d and Total Tiles: %d (%dk/tile)tiles \n",
-        CoreCount, TileWidth, TileHeight, TotalTileCount , TileWidth*TileHeight*1/256); // 4/1024 
+    printf("Raycaster Configuration %d Cores: with %dx%d and Total Tiles: %d (%dk/tile)tiles %d-Wide Lanes\n",
+        CoreCount, TileWidth, TileHeight, TotalTileCount , TileWidth*TileHeight*1/256, LANE_WIDTH); // 4/1024 
     
     printf("Quality is MaxBounces: %d and RaysPerPixel: %d",Queue.MaxBounceCount, Queue.RaysPerPixel);
 
@@ -399,7 +464,6 @@ int main() {
                     Order->Entropy = Entropy;
                 }
             }
-
         assert(Queue.WorkOrderCount == TotalTileCount);
 
         // memory fencing being done here
