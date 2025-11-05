@@ -185,7 +185,7 @@ CastSampleRays(cast_state* State)
     f32 Contribution = 1.0f / (f32)(RaysPerPixel);
     lane_u32 BouncesComputed = LaneU32FromU32(0);
     for (u32 RayIndex = 0;
-        RayIndex < RaysPerPixel;
+        RayIndex < LaneRayCount;
         ++RayIndex) {
         lane_f32 Offx = FilmX + RandomBilateralLane(&Series) * HalfPixW; // correct
         lane_f32 Offy = FilmY + RandomBilateralLane(&Series) * HalfPixH; // correct
@@ -194,7 +194,7 @@ CastSampleRays(cast_state* State)
         lane_v3 RayDirection = NOZ(FilmP - CameraPosiition); // correct
 
         lane_v3 Color = {};
-        lane_v3 Attenuation = LaneV3FromV3(V3(1.0f, 1.0f, 1.0f)); // correct
+        lane_v3 Attenuation = LaneV3FromV3(V3_Initialize(1.0f, 1.0f, 1.0f)); // correct
         lane_f32 MinHitDistance = LaneF32FromF32(0.001f); // correct
         lane_f32 Tolerence = LaneF32FromF32(0.0001f); // correct
         lane_u32 LaneMask = LaneU32FromU32(0xFFFFFFFF); // correct
@@ -209,8 +209,8 @@ CastSampleRays(cast_state* State)
             lane_u32 LaneIncrement = LaneU32FromU32(1); // correct
             BouncesComputed += (LaneIncrement & LaneMask); // correct
 
-            lane_v3 NextOrigin = LaneV3FromV3(V3(0.0f, 0.0f, 0.0f));
-            lane_v3 NextNormal = LaneV3FromV3(V3(0.0f, 0.0f, 0.0f));
+            lane_v3 NextOrigin = LaneV3FromV3(V3_Initialize(0.0f, 0.0f, 0.0f));
+            lane_v3 NextNormal = LaneV3FromV3(V3_Initialize(0.0f, 0.0f, 0.0f));
 
             for (u32 PlaneIndex = 0;
                 PlaneIndex < World->PlaneCount;
@@ -223,10 +223,11 @@ CastSampleRays(cast_state* State)
 
                 lane_f32 denominator = Inner(PlaneN, RayDirection);
                 lane_f32 t = (-PlaneD - Inner(PlaneN, RayOrigin)) / denominator;
+                
                 lane_u32 DenomMask = ((denominator < -Tolerence) | (denominator > Tolerence));
                 lane_u32 tMask = ((t > MinHitDistance) & (t < HitDistance));
-
                 lane_u32 HitMask = (DenomMask & tMask);
+
                 ConditionalAssign(&HitDistance, HitMask, t);
                 ConditionalAssign(&HitMatIndex, HitMask, PlaneMatIndex);
                 ConditionalAssign(&NextNormal, HitMask, PlaneN);
@@ -357,13 +358,14 @@ renderTile(work_queue* Queue)
 
             v3 FinalColor = State.FinalColor;
 
-            v4 BMPColor = {
-                255.0f * ExactLinearTosRGB(FinalColor.x),
-                255.0f * ExactLinearTosRGB(FinalColor.y),
-                255.0f * ExactLinearTosRGB(FinalColor.z),
-                255.0f
-            };
-            u32 BMPValue = BGRAPack4x8(BMPColor);
+            f32 r = 255.0f * ExactLinearTosRGB(FinalColor.x);
+            f32 g = 255.0f * ExactLinearTosRGB(FinalColor.y);
+            f32 b = 255.0f * ExactLinearTosRGB(FinalColor.z);
+
+            u32 BMPValue = ((RoundRealI32ToUInt32(255.0f) << 24) |
+                            (RoundRealI32ToUInt32(r) << 16) |
+                            (RoundRealI32ToUInt32(g) << 8)  |
+                            (RoundRealI32ToUInt32(b) << 0));
             *Out++ = BMPValue;
         }
     }
@@ -381,37 +383,37 @@ int main()
 
     material Materials[7] = {};
 
-    Materials[0].EmitColor = V3(0.3f, 0.4f, 0.5f);
-    Materials[1].RefColor = V3(0.5f, 0.5f, 0.5f);
-    Materials[2].RefColor = V3(0.7f, 0.5f, 0.3f);
-    Materials[3].EmitColor = V3(4.0f, 0.0f, 0.0f);
-    Materials[4].RefColor = V3(0.2f, 0.8f, 0.2f);
+    Materials[0].EmitColor = V3_Initialize(0.3f, 0.4f, 0.5f);
+    Materials[1].RefColor = V3_Initialize(0.5f, 0.5f, 0.5f);
+    Materials[2].RefColor = V3_Initialize(0.7f, 0.5f, 0.3f);
+    Materials[3].EmitColor = V3_Initialize(4.0f, 0.0f, 0.0f);
+    Materials[4].RefColor = V3_Initialize(0.2f, 0.8f, 0.2f);
     Materials[4].Scatter = 0.7f;
-    Materials[5].RefColor = V3(0.4f, 0.8f, 0.9f);
+    Materials[5].RefColor = V3_Initialize(0.4f, 0.8f, 0.9f);
     Materials[5].Scatter = 0.85f;
-    Materials[6].RefColor = V3(0.95f, 0.95f, 0.95f);
+    Materials[6].RefColor = V3_Initialize(0.95f, 0.95f, 0.95f);
     Materials[6].Scatter = 1.0f;
 
     plane Planes[1] = {};
     Planes[0].MatIndex = 1;
-    Planes[0].N = V3(0, 0, 1);
+    Planes[0].N = V3_Initialize(0, 0, 1);
     Planes[0].d = 0;
 
     sphere Sphere[5] = {};
     Sphere[0].MatIndex = 2;
-    Sphere[0].P = V3(0.0f, 0.0f, 0.0f);
+    Sphere[0].P = V3_Initialize(0.0f, 0.0f, 0.0f);
     Sphere[0].r = 1.0f;
     Sphere[1].MatIndex = 3;
-    Sphere[1].P = V3(3.0f, -2.0f, 0.0f);
+    Sphere[1].P = V3_Initialize(3.0f, -2.0f, 0.0f);
     Sphere[1].r = 1.0f;
     Sphere[2].MatIndex = 4;
-    Sphere[2].P = V3(-2.0f, -1.0f, 2.0f);
+    Sphere[2].P = V3_Initialize(-2.0f, -1.0f, 2.0f);
     Sphere[2].r = 1.0f;
     Sphere[3].MatIndex = 5;
-    Sphere[3].P = V3(1.0f, -1.0f, 3.0f);
+    Sphere[3].P = V3_Initialize(1.0f, -1.0f, 3.0f);
     Sphere[3].r = 1.0f;
     Sphere[4].MatIndex = 6;
-    Sphere[4].P = V3(-2.0f, 3.0f, 0.0f);
+    Sphere[4].P = V3_Initialize(-2.0f, 3.0f, 0.0f);
     Sphere[4].r = 1.0f;
 
     world World = {};
@@ -422,7 +424,7 @@ int main()
     World.SphereCount = ArrayCount(Sphere);
     World.Spheres = Sphere;
 
-    u32 CoreCount = GetCPUCount();
+    u32 CoreCount =  GetCPUCount();
     u32 TileWidth = Image.Width / CoreCount;
     u32 TileHeight = TileWidth;
     TileWidth = TileHeight = 64;
@@ -467,7 +469,10 @@ int main()
             Order->OnePastXMax = OnePastMaxX;
             Order->OnePastYMax = OnePastMaxY;
 
-            random_series Entropy = { TileX * 1024 + TileY * 5120 };
+            random_series Entropy = { LaneU32FromU32(2397458 + TileX * 29083 + TileY * 97843,
+                9878934 + TileX * 89243 + TileY * 12938,
+                6783234 + TileX * 29738 + TileY * 97853,
+                2945085 + TileX * 54378 + TileY * 89722) };
             Order->Entropy = Entropy;
         }
     }

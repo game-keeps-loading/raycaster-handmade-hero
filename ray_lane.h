@@ -1,10 +1,8 @@
-// #pragma warning(disable:4505)
-// #pragma once
+#pragma warning(disable : 4505)
 #ifndef RAY_LANE_H
 #define RAY_LANE_H
-
 #include"ray.h"
-#define LANE_WIDTH 1
+#define LANE_WIDTH 4
 
 #if ((LANE_WIDTH == 8))
 #if defined(_MSC_VER)
@@ -83,7 +81,8 @@ internal lane_u32
 operator!=(lane_u32 A, lane_u32 B) {
     lane_u32 Result;    
      
-    Result.V = _mm_castps_si128(_mm_cmpneq_ps(_mm_castsi128_ps(A.V),_mm_castsi128_ps(B.V)));
+    // Result.V = _mm_castps_si128(_mm_cmpneq_ps(_mm_castsi128_ps(A.V),_mm_castsi128_ps(B.V)));
+     Result.V = _mm_xor_si128(_mm_cmpeq_epi32(A.V,B.V),_mm_set1_epi32(0xFFFFFFFF));
     return Result;
 }
 
@@ -250,11 +249,11 @@ SquareRoot(lane_f32 A) {
     return Result;
 };
 
-internal lane_f32
-ReverseSquareRoot(lane_f32 A) {
-    lane_f32 Result;
-    Result.V = _mm_rsqrt_ps(A.V);
-}
+// internal lane_f32
+// ReverseSquareRoot(lane_f32 A) {
+//     lane_f32 Result;
+//     Result.V = _mm_rsqrt_ps(A.V);
+// }
 
 // Min and Max
 
@@ -278,7 +277,7 @@ Max(lane_f32 A, lane_f32 B) {
 
 internal void
 ConditionalAssign(lane_f32 *Dest, lane_u32 Mask, lane_f32 Source ) {
-    __m128 MaskPs = _mm_cvtepi32_ps(Mask.V);
+    __m128 MaskPs = _mm_castsi128_ps(Mask.V);
     Dest->V = _mm_or_ps(_mm_andnot_ps(MaskPs,Dest->V),
                       _mm_and_ps(MaskPs,Source.V)); // we want source is assigned if mask is 1 we use positive version of mask to pick source and negative for dest
 }
@@ -290,9 +289,9 @@ GatherF32_(void *BasePtr, u32 Stride, lane_u32 Indices) {
 
     lane_f32 Result;
     Result.V = _mm_setr_ps(*(f32 *)((u8 *)BasePtr + V[0]*Stride),
-                           *(f32 *)((u8 *)BasePtr + V[0]*Stride),
-                           *(f32 *)((u8 *)BasePtr + V[0]*Stride),
-                           *(f32 *)((u8 *)BasePtr + V[0]*Stride));
+                           *(f32 *)((u8 *)BasePtr + V[1]*Stride),
+                           *(f32 *)((u8 *)BasePtr + V[2]*Stride),
+                           *(f32 *)((u8 *)BasePtr + V[3]*Stride));
 
     return Result;
 }
@@ -305,19 +304,39 @@ MaskIsZeroed(lane_u32 A) {
     return (Mask==0);
 }
 
+// internal u64
+// HorizontalAdd(lane_u32 A) {
+//     u32 *V = (u32 *)&A.V; // cast the value to a u32 Pointer so we can offset it to get the values
+//     u64 Result = (u64)V[0] + (u64)V[1] + (u64)V[2];
+
+//     return Result;
+// }
+
+// internal f32
+// HorizontalAdd(lane_f32 A) {
+//     f32 *V = (f32 *)&A.V; 
+//     f32 Result = V[0] + V[1] + V[2];
+
+//     return Result;
+// }
+
 internal u64
 HorizontalAdd(lane_u32 A) {
-    u32 *V = (u32 *)&A.V; // cast the value to a u32 Pointer so we can offset it to get the values
-    u64 Result = (u64)V[0] + (u64)V[1] + (u64)V[2];
-
+    u32 *V = (u32 *)&A.V;
+    u64 Result = 0;
+    for (u32 i = 0; i < LANE_WIDTH; ++i) {
+        Result += (u64)V[i];
+    }
     return Result;
 }
 
 internal f32
 HorizontalAdd(lane_f32 A) {
-    f32 *V = (f32 *)&A.V; 
-    f32 Result = V[0] + V[1] + V[2];
-
+    f32 *V = (f32 *)&A.V;
+    f32 Result = 0.0f;
+    for (u32 i = 0; i < LANE_WIDTH; ++i) {
+        Result += V[i];
+    }
     return Result;
 }
 
@@ -425,6 +444,15 @@ operator&(lane_u32 A, lane_v3 B) {
 
     return Result;
 }
+
+internal lane_u32
+LaneU32FromU32(u32 A, u32 B, u32 C, u32 D) {
+    lane_u32 Result;
+    B = B + C + D;
+    Result = A;
+    return Result;
+}
+
 #else
 #error Lane Width must be set to 1 , 4 , 8 or 16:
 #endif
@@ -496,7 +524,7 @@ operator-(lane_f32 A, f32 B) {
 internal lane_f32
 operator-(f32 B, lane_f32 A) {
     lane_f32 Result;
-    Result = A - LaneF32FromF32(B);
+    Result = LaneF32FromF32(B) - A;
     return Result; 
 }
 
@@ -553,7 +581,7 @@ operator/(lane_f32 A, f32 B) {
 internal lane_f32
 operator/(f32 B, lane_f32 A) {
     lane_f32 Result;
-    Result = A / LaneF32FromF32(B);
+    Result =  LaneF32FromF32(B) / A;
     return Result; 
 }
 

@@ -175,7 +175,7 @@ IsZero(v2 A)
 //
 
 inline v3
-V3(f32 x, f32 y, f32 z)
+V3_Initialize(f32 x, f32 y, f32 z)
 {
   v3 Result = { x, y, z };
   return Result;
@@ -308,7 +308,7 @@ NOZ(lane_v3 A) {
     lane_v3 Result = {};
 
     lane_f32 LenSq = LengthSq(A);
-    lane_u32 Mask =  (LenSq > Square(LaneF32FromF32(0.0001f)));
+    lane_u32 Mask =  (LenSq > Square_Scaler(0.0001f));
         ConditionalAssign(&Result, Mask, A * (1.0f / SquareRoot(LenSq)));
 
     return Result;
@@ -343,66 +343,4 @@ Lane_V3(lane_f32 x, lane_f32 y, lane_f32 z) {
     return Result;
 }
 
-#pragma warning(disable : 4201)
-union v4
-{
-    struct {
-        union {
-            v3 xyz;
-            struct
-            {
-                f32 x, y, z;
-            };
-        };
-        f32 w;
-    };
-    struct {
-        union {
-            v3 rgb;
-            struct
-            {
-                f32 r, g, b;
-            };
-        };
-        f32 a;
-    };
-    struct
-    {
-        v2 xy;
-        f32 Ignored0_;
-        f32 Ignored1_;
-    };
-    struct
-    {
-        f32 Ignored2_;
-        v2 yz;
-        f32 Ignored3_;
-    };
-    struct
-    {
-        f32 Ignored4_;
-        f32 Ignored5_;
-        v2 zw;
-    };
-    f32 E[4];
-};
-#pragma warning(default : 4201)
-
-inline v4
-V4(f32 x, f32 y, f32 z, f32 w)
-{
-  v4 Result = { x, y, z, w };
-  return Result;
-}
-
-inline u32
-BGRAPack4x8(v4 Unpacked)
-{
-    u32 Result = ((RoundRealI32ToUInt32(Unpacked.a) << 24) |
-                  (RoundRealI32ToUInt32(Unpacked.r) << 16) |
-                  (RoundRealI32ToUInt32(Unpacked.g) << 8)  |
-                  (RoundRealI32ToUInt32(Unpacked.b) << 0));
-
-    return(Result);
-}
 #endif
