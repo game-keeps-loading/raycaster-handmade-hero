@@ -76,7 +76,7 @@ struct  image_u32 {
 };
 
 struct  material {
-    f32 Scatter; // 0 is pure diffuse 1 is mirror
+    f32 Secular; // 0 is pure diffuse 1 is mirror
     v3 RefColor;
     v3 EmitColor;
 };

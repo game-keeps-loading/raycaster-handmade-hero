@@ -28,6 +28,7 @@ struct work_queue {
     volatile u64 NextWorkOrderIndex;
     volatile u64 BonucesComputed;
     volatile u64 TileRetiredCount;
+    volatile u64 LoopsComputed;
 };
 
 struct cast_state {
@@ -52,6 +53,7 @@ struct cast_state {
     random_series Series;
     v3 FinalColor;
     u64 BouncesComputed;
+    u64 LoopsComputed;
 };
 
 //
@@ -70,7 +72,7 @@ internal lane_u32 xorshift32(random_series* Series)
 internal lane_f32
 RandomUnilateral(random_series* Series)
 {
-    lane_f32 Result = LaneF32FromLaneU32(xorshift32(Series)) / LaneF32FromU32(U32Max);
+    lane_f32 Result = LaneF32FromLaneU32(xorshift32(Series) >> 1) / LaneF32FromU32(U32Max >> 1);
     return Result;
 }
 
@@ -177,6 +179,8 @@ CastSampleRays(cast_state* State)
     random_series Series = State->Series;
     lane_v3 FinalColor = {};
 
+    u64 LoopsComputed = 0;
+
     // cast_state Result = {};
     u32 LaneWidth = LANE_WIDTH;
     u32 LaneRayCount = RaysPerPixel / LaneWidth;
@@ -208,6 +212,7 @@ CastSampleRays(cast_state* State)
             lane_u32 HitMatIndex = LaneU32FromU32(0); // correct
             lane_u32 LaneIncrement = LaneU32FromU32(1); // correct
             BouncesComputed += (LaneIncrement & LaneMask); // correct
+            LoopsComputed += LANE_WIDTH;
 
             lane_v3 NextOrigin = LaneV3FromV3(V3_Initialize(0.0f, 0.0f, 0.0f));
             lane_v3 NextNormal = LaneV3FromV3(V3_Initialize(0.0f, 0.0f, 0.0f));
@@ -219,18 +224,24 @@ CastSampleRays(cast_state* State)
                 plane Plane = World->Planes[PlaneIndex];
                 lane_v3 PlaneN = LaneV3FromV3(Plane.N);
                 lane_f32 PlaneD = LaneF32FromF32(Plane.d);
-                lane_u32 PlaneMatIndex = LaneU32FromU32(Plane.MatIndex);
-
+        
                 lane_f32 denominator = Inner(PlaneN, RayDirection);
                 lane_f32 t = (-PlaneD - Inner(PlaneN, RayOrigin)) / denominator;
                 
                 lane_u32 DenomMask = ((denominator < -Tolerence) | (denominator > Tolerence));
-                lane_u32 tMask = ((t > MinHitDistance) & (t < HitDistance));
-                lane_u32 HitMask = (DenomMask & tMask);
 
-                ConditionalAssign(&HitDistance, HitMask, t);
-                ConditionalAssign(&HitMatIndex, HitMask, PlaneMatIndex);
-                ConditionalAssign(&NextNormal, HitMask, PlaneN);
+                if (!MaskIsZeroed(DenomMask)) {
+
+                    lane_u32 tMask = ((t > MinHitDistance) & (t < HitDistance));
+                    lane_u32 HitMask = (DenomMask & tMask);
+
+                    if (!MaskIsZeroed(HitMask)) {
+                        lane_u32 PlaneMatIndex = LaneU32FromU32(Plane.MatIndex);
+                        ConditionalAssign(&HitDistance, HitMask, t);
+                        ConditionalAssign(&HitMatIndex, HitMask, PlaneMatIndex);
+                        ConditionalAssign(&NextNormal, HitMask, PlaneN);
+                    }
+                }
             }
 
             for (u32 SphereIndex = 0;
@@ -241,54 +252,58 @@ CastSampleRays(cast_state* State)
 
                 lane_v3 SphereP = LaneV3FromV3(Sphere.P);
                 lane_f32 Spherer = LaneF32FromF32(Sphere.r);
-                lane_u32 SphereMatIndex = LaneU32FromU32(Sphere.MatIndex);
 
                 lane_v3 SphereRelativePosition = RayOrigin - SphereP;
                 lane_f32 a = Inner(RayDirection, RayDirection);
                 lane_f32 b = 2.0f * Inner(SphereRelativePosition, RayDirection);
                 lane_f32 c = Inner(SphereRelativePosition, SphereRelativePosition) - Spherer * Spherer;
-
-                lane_f32 denominator = 2.0f * a;
+                
                 lane_f32 RootTerm = SquareRoot(b * b - 4.0f * a * c);
-
-                lane_f32 tp = (-b + RootTerm) / denominator;
-                lane_f32 tn = (-b - RootTerm) / denominator;
-
                 lane_u32 RootMask = (RootTerm > Tolerence);
 
-                lane_f32 t = tp;
+                if (!MaskIsZeroed(RootMask)) {
+                    lane_f32 denominator = 2.0f * a;
+                    lane_f32 tp = (-b + RootTerm) / denominator;
+                    lane_f32 tn = (-b - RootTerm) / denominator;
 
-                lane_u32 PickMask = ((tn > MinHitDistance) & (tn < tp));
+                    lane_f32 t = tp;
 
-                ConditionalAssign(&t, PickMask, tn);
+                    lane_u32 PickMask = ((tn > MinHitDistance) & (tn < tp));
 
-                lane_u32 tMask = (((t > MinHitDistance) & (t < HitDistance)));
-                lane_u32 HitMask = (RootMask & tMask);
+                    ConditionalAssign(&t, PickMask, tn);
 
-                ConditionalAssign(&HitDistance, HitMask, t);
-                ConditionalAssign(&HitMatIndex, HitMask, SphereMatIndex);
-                ConditionalAssign(&NextNormal, HitMask, NOZ(t * RayDirection + SphereRelativePosition));
+                    lane_u32 tMask = (((t > MinHitDistance) & (t < HitDistance)));
+                    lane_u32 HitMask = (RootMask & tMask);
+
+                    if (!MaskIsZeroed(HitMask)) {
+                        lane_u32 SphereMatIndex = LaneU32FromU32(Sphere.MatIndex);
+                        ConditionalAssign(&HitDistance, HitMask, t);
+                        ConditionalAssign(&HitMatIndex, HitMask, SphereMatIndex);
+                        ConditionalAssign(&NextNormal, HitMask, NOZ(t * RayDirection + SphereRelativePosition));
+                    }
+                }
             }
 
             // n way load
             lane_v3 MatEmitColor = LaneMask & (GatherV3(World->Materials, HitMatIndex, EmitColor)); // Must Return 0 on Lane Mask cause it was not hit
             lane_v3 MatRefColor = GatherV3(World->Materials, HitMatIndex, RefColor);
-            lane_f32 MatScatter = GatherF32(World->Materials, HitMatIndex, Scatter);
+            lane_f32 MatSecular = GatherF32(World->Materials, HitMatIndex, Secular);
 
             Color += Hadamard(Attenuation, MatEmitColor);
             LaneMask &= (HitMatIndex != LaneU32FromU32(0));
 
-            lane_f32 CosAtten = (Max(Inner(-RayDirection, NextNormal), LaneF32FromF32(0.0f)));
-            Attenuation = Hadamard(Attenuation, CosAtten * MatRefColor);
-
-            RayOrigin += HitDistance * RayDirection;
-
-            lane_v3 PureBounce = RayDirection - 2.0f * Inner(RayDirection, NextNormal) * NextNormal;
-            lane_v3 RandomBounce = NOZ(NextNormal + Lane_V3(RandomBilateralLane(&Series), RandomBilateralLane(&Series), RandomBilateralLane(&Series)));
-            RayDirection = NOZ(Lerp(RandomBounce, MatScatter, PureBounce));
-
             if (MaskIsZeroed(LaneMask)) {
                 break;
+            } else {
+
+                lane_f32 CosAtten = (Max(Inner(-RayDirection, NextNormal), LaneF32FromF32(0.0f)));
+                Attenuation = Hadamard(Attenuation, CosAtten * MatRefColor);
+
+                RayOrigin += HitDistance * RayDirection;
+
+                lane_v3 PureBounce = RayDirection - 2.0f * Inner(RayDirection, NextNormal) * NextNormal;
+                lane_v3 RandomBounce = NOZ(NextNormal + Lane_V3(RandomBilateralLane(&Series), RandomBilateralLane(&Series), RandomBilateralLane(&Series)));
+                RayDirection = NOZ(Lerp(RandomBounce, MatSecular, PureBounce));
             }
         }
 
@@ -296,7 +311,9 @@ CastSampleRays(cast_state* State)
     }
 
     State->BouncesComputed += HorizontalAdd(BouncesComputed);
+    State->LoopsComputed += LoopsComputed;
     State->FinalColor = HorizontalAdd(FinalColor);
+    State->Series = Series;
 }
 
 internal b32x
@@ -343,6 +360,7 @@ renderTile(work_queue* Queue)
     State.RaysPerPixel = Queue->RaysPerPixel;
     State.MaxBounceCount = Queue->MaxBounceCount;
     State.BouncesComputed = 0;
+    State.LoopsComputed = 0;
 
     for (u32 y = YMin;
         y < OnePastYMax;
@@ -372,6 +390,7 @@ renderTile(work_queue* Queue)
 
     LockedADDAndReturnPreviousValue(&Queue->BonucesComputed, State.BouncesComputed);
     LockedADDAndReturnPreviousValue(&Queue->TileRetiredCount, 1);
+    LockedADDAndReturnPreviousValue(&Queue->LoopsComputed, State.LoopsComputed);
     return true;
 }
 
@@ -388,11 +407,11 @@ int main()
     Materials[2].RefColor = V3_Initialize(0.7f, 0.5f, 0.3f);
     Materials[3].EmitColor = V3_Initialize(4.0f, 0.0f, 0.0f);
     Materials[4].RefColor = V3_Initialize(0.2f, 0.8f, 0.2f);
-    Materials[4].Scatter = 0.7f;
+    Materials[4].Secular = 0.7f;
     Materials[5].RefColor = V3_Initialize(0.4f, 0.8f, 0.9f);
-    Materials[5].Scatter = 0.85f;
+    Materials[5].Secular = 0.85f;
     Materials[6].RefColor = V3_Initialize(0.95f, 0.95f, 0.95f);
-    Materials[6].Scatter = 1.0f;
+    Materials[6].Secular = 1.0f;
 
     plane Planes[1] = {};
     Planes[0].MatIndex = 1;
@@ -497,11 +516,15 @@ int main()
     }
 
     const char* filename = "test.bmp";
-
+    u64 TotalBounce = Queue.LoopsComputed;
+    u64 UsedBounces = Queue.BonucesComputed;
+    u64 WastedBounces = Queue.LoopsComputed - Queue.BonucesComputed;
     clock_t EndClock = clock();
     clock_t TimeElapsed = EndClock - StartClock;
     printf("\n Raycasting time %ldms \n", TimeElapsed);
-    printf("Total Bounces %lld \n", Queue.BonucesComputed);
+    printf("Used Bounces %lld \n", UsedBounces);
+    printf("Total Bounces %lld \n", TotalBounce);
+    printf("Wasted Bounces %lld (%0.02f%%) \n", WastedBounces, 100.0f * (f32)WastedBounces/(f32)Queue.LoopsComputed);
     printf("Performance %lf ms per bounces \n", (f64)(TimeElapsed) / (f64)Queue.BonucesComputed);
 
     WriteImage(Image, filename);

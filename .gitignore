@@ -3,4 +3,9 @@
 *.txt
 *.pdb
 *.ilk
-*.vs
+*.vs/
+*.suo
+*.db
+.vscode/
+.vscode-test/
+ build/
