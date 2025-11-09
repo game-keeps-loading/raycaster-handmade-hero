@@ -1,3 +1,5 @@
+// #pragma clang diagnostic ignored "-Wmissing-braces"
+
 #ifndef RAY_MATH_H
 #define RAY_MATH_H
 
@@ -19,7 +21,7 @@ union v2 {
 inline v2
 Perp(v2 v)
 {
-  v2 Result = { -v.y, v.x };
+  v2 Result = { -v.y , v.x };
   return Result;
 }
 
@@ -135,6 +137,7 @@ RoundRealI32ToUInt32(f32 F) {
     u32 Result = (u32)(F + 0.5f);
     return Result;
 }
+
 inline f32
 LengthSq(v2 A)
 {

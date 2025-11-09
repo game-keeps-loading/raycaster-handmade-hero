@@ -1,4 +1,5 @@
 #pragma warning(disable : 4505)
+// #pragma clang diagnostic ignored "-Wunused-function"
 #ifndef RAY_LANE_H
 #define RAY_LANE_H
 #include"ray.h"
@@ -374,6 +375,13 @@ Result = Min(Max(A, LaneF32FromF32(0.0f)), LaneF32FromF32(1.0f));
 return Result;
 }
 
+internal f32 
+Clamp01(f32 A) {
+    f32 Result;
+Result = min(max(A, 0.0f), 1.0f);
+return Result;
+}
+
 internal lane_v3
 LaneV3FromV3(v3 A) {
     lane_v3 Result;
@@ -416,6 +424,8 @@ Extract0(lane_v3 A) {
 
     return Result;
 }
+
+#define ExtractF32(A, I) ((f32 *)&A)[I]
 
 internal lane_v3
 GatherV3_(void *BasePtr, u32 Stride, lane_u32 Indices) {

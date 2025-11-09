@@ -153,28 +153,89 @@ ExactLinearTosRGB(f32 L)
     return S;
 }
 
+internal lane_v3
+BRDFLookUp(material *Material, lane_u32 MatIndex, lane_v3 ViewDir,
+           lane_v3 Normal, lane_v3 Tangent, lane_v3 BiNormal,
+           lane_v3 LightDir) {
+    lane_v3 HalfVector = NOZ(0.5f * (ViewDir + LightDir));
+
+    lane_v3 LW;
+    LW.x = Inner(LightDir, Tangent);
+    LW.y = Inner(LightDir, BiNormal);
+    LW.z = Inner(LightDir, Normal);
+
+    lane_v3 HW;
+    HW.x = Inner(HalfVector, Tangent);
+    HW.y = Inner(HalfVector, BiNormal);
+    HW.z = Inner(HalfVector, Normal);
+
+    lane_v3 DiffY = NOZ(Cross(HW, Tangent));
+    lane_v3 DiffX = NOZ(Cross(DiffY, HW));
+
+    lane_f32 DiffXInner = Inner(DiffX, LW);
+    lane_f32 DiffYInner = Inner(DiffY, LW);
+    lane_f32 DiffZInner = Inner(HW, LW);
+    
+    lane_v3 Result = {};
+
+    for (u32 SubIndex = 0;
+        SubIndex < LANE_WIDTH;
+        SubIndex++) {
+
+        f32 ThetaHalf = acosf(ExtractF32(HW.z, SubIndex));
+        f32 ThetaDiff = acosf(ExtractF32(DiffZInner, SubIndex));
+        f32 PhiDiff = atan2f(ExtractF32(DiffYInner, SubIndex),
+                             ExtractF32(DiffXInner, SubIndex));
+
+        if(PhiDiff < 0) { PhiDiff += Pi32; }
+
+        brdf_table *Table = &Material[((u32 *)&MatIndex)[SubIndex]].BRDF;
+        
+        f32 F0 = SquareRoot(Clamp01(ThetaHalf/ (0.5f * Pi32)));
+        u32 I0 = RoundRealI32ToUInt32(( Table->Count[0] - 1) * F0);
+
+        f32 F1 = Clamp01(ThetaDiff/ (0.5f * Pi32));
+        u32 I1 = RoundRealI32ToUInt32(( Table->Count[1] - 1) * F1);
+
+        f32 F2 = Clamp01(PhiDiff / Pi32);
+        u32 I2 = RoundRealI32ToUInt32(( Table->Count[2] - 1) * F2);
+        
+        u32 Index = I2 + I1 * Table->Count[2] + I0 * Table->Count[1] * Table->Count[2];
+
+        assert(Index < (Table->Count[0] * Table->Count[1] * Table->Count[2]));
+
+        v3 Color = Table->Values[Index];
+ 
+        ((f32 *)&Result.x)[SubIndex] = Color.x;
+        ((f32 *)&Result.y)[SubIndex] = Color.y;
+        ((f32 *)&Result.z)[SubIndex] = Color.z;
+    }
+
+    return Result;
+}
+
 internal void
 CastSampleRays(cast_state* State)
 {
 
-    world* World = State->World; // correct
-    u32 RaysPerPixel = State->RaysPerPixel; // correct
-    u32 MaxBounceCount = State->MaxBounceCount; // correct
+    world* World = State->World;
+    u32 RaysPerPixel = State->RaysPerPixel;
+    u32 MaxBounceCount = State->MaxBounceCount;
 
-    lane_f32 HalfPixW = LaneF32FromF32(State->HalfPixW); // correct
-    lane_f32 HalfPixH = LaneF32FromF32(State->HalfPixH); // correct
+    lane_f32 HalfPixW = LaneF32FromF32(State->HalfPixW);
+    lane_f32 HalfPixH = LaneF32FromF32(State->HalfPixH);
 
-    lane_f32 FilmX = State->FilmX + HalfPixW; // correct
-    lane_f32 FilmY = State->FilmY + HalfPixH; // correct
+    lane_f32 FilmX = State->FilmX + HalfPixW;
+    lane_f32 FilmY = State->FilmY + HalfPixH;
 
-    lane_v3 FilmCenter = LaneV3FromV3(State->FilmCenter); // correct
-    lane_f32 HalfFilmW = LaneF32FromF32(State->HalfFilmW); // correct
-    lane_f32 HalfFilmH = LaneF32FromF32(State->HalfFilmH); // correct
+    lane_v3 FilmCenter = LaneV3FromV3(State->FilmCenter);
+    lane_f32 HalfFilmW = LaneF32FromF32(State->HalfFilmW);
+    lane_f32 HalfFilmH = LaneF32FromF32(State->HalfFilmH);
 
-    lane_v3 CameraX = LaneV3FromV3(State->CameraX); // correct
-    lane_v3 CameraY = LaneV3FromV3(State->CameraY); // correct
-    lane_v3 CameraZ = LaneV3FromV3(State->CameraZ); // correct
-    lane_v3 CameraPosiition = LaneV3FromV3(State->CameraPosiition); // correct
+    lane_v3 CameraX = LaneV3FromV3(State->CameraX);
+    lane_v3 CameraY = LaneV3FromV3(State->CameraY);
+    // lane_v3 CameraZ = LaneV3FromV3(State->CameraZ);
+    lane_v3 CameraPosiition = LaneV3FromV3(State->CameraPosiition);
 
     random_series Series = State->Series;
     lane_v3 FinalColor = {};
@@ -191,38 +252,42 @@ CastSampleRays(cast_state* State)
     for (u32 RayIndex = 0;
         RayIndex < LaneRayCount;
         ++RayIndex) {
-        lane_f32 Offx = FilmX + RandomBilateralLane(&Series) * HalfPixW; // correct
-        lane_f32 Offy = FilmY + RandomBilateralLane(&Series) * HalfPixH; // correct
-        lane_v3 FilmP = FilmCenter + Offx * HalfFilmW * CameraX + Offy * HalfFilmH * CameraY; // correct
-        lane_v3 RayOrigin = CameraPosiition; // correct
-        lane_v3 RayDirection = NOZ(FilmP - CameraPosiition); // correct
+        lane_f32 Offx = FilmX + RandomBilateralLane(&Series) * HalfPixW;
+        lane_f32 Offy = FilmY + RandomBilateralLane(&Series) * HalfPixH;
+        lane_v3 FilmP = FilmCenter + Offx * HalfFilmW * CameraX + Offy * HalfFilmH * CameraY;
+        lane_v3 RayOrigin = CameraPosiition;
+        lane_v3 RayDirection = NOZ(FilmP - CameraPosiition);
 
         lane_v3 Color = {};
-        lane_v3 Attenuation = LaneV3FromV3(V3_Initialize(1.0f, 1.0f, 1.0f)); // correct
-        lane_f32 MinHitDistance = LaneF32FromF32(0.001f); // correct
-        lane_f32 Tolerence = LaneF32FromF32(0.0001f); // correct
-        lane_u32 LaneMask = LaneU32FromU32(0xFFFFFFFF); // correct
+        lane_v3 Attenuation = LaneV3FromV3(V3_Initialize(1.0f, 1.0f, 1.0f));
+        lane_f32 MinHitDistance = LaneF32FromF32(0.001f);
+        lane_f32 Tolerence = LaneF32FromF32(0.0001f);
+        lane_u32 LaneMask = LaneU32FromU32(0xFFFFFFFF);
 
         // HIT TEST FOR PLANES
         for (u32 BounceCount = 0;
             BounceCount < MaxBounceCount;
             ++BounceCount) {
 
-            lane_f32 HitDistance = LaneF32FromF32(F32Max); // correct
-            lane_u32 HitMatIndex = LaneU32FromU32(0); // correct
-            lane_u32 LaneIncrement = LaneU32FromU32(1); // correct
-            BouncesComputed += (LaneIncrement & LaneMask); // correct
+            lane_f32 HitDistance = LaneF32FromF32(F32Max);
+            lane_u32 HitMatIndex = LaneU32FromU32(0);
+            lane_u32 LaneIncrement = LaneU32FromU32(1);
+            BouncesComputed += (LaneIncrement & LaneMask);
             LoopsComputed += LANE_WIDTH;
 
-            lane_v3 NextOrigin = LaneV3FromV3(V3_Initialize(0.0f, 0.0f, 0.0f));
-            lane_v3 NextNormal = LaneV3FromV3(V3_Initialize(0.0f, 0.0f, 0.0f));
+            // lane_v3 NextOrigin = LaneV3FromV3(V3_Initialize(0.0f, 0.0f, 0.0f));
+            lane_v3 Normal = {};
+            lane_v3 Tangent = {};
+            lane_v3 BiNormal = {};
 
             for (u32 PlaneIndex = 0;
                 PlaneIndex < World->PlaneCount;
                 ++PlaneIndex) {
 
                 plane Plane = World->Planes[PlaneIndex];
-                lane_v3 PlaneN = LaneV3FromV3(Plane.N);
+                lane_v3 PlaneN = LaneV3FromV3(Plane.Normal);
+                lane_v3 PlaneB = LaneV3FromV3(Plane.BiNormal);
+                lane_v3 PlaneT = LaneV3FromV3(Plane.Tangent);
                 lane_f32 PlaneD = LaneF32FromF32(Plane.d);
         
                 lane_f32 denominator = Inner(PlaneN, RayDirection);
@@ -239,7 +304,9 @@ CastSampleRays(cast_state* State)
                         lane_u32 PlaneMatIndex = LaneU32FromU32(Plane.MatIndex);
                         ConditionalAssign(&HitDistance, HitMask, t);
                         ConditionalAssign(&HitMatIndex, HitMask, PlaneMatIndex);
-                        ConditionalAssign(&NextNormal, HitMask, PlaneN);
+                        ConditionalAssign(&Normal, HitMask, PlaneN);
+                        ConditionalAssign(&Tangent, HitMask, PlaneT);
+                        ConditionalAssign(&BiNormal, HitMask, PlaneB);
                     }
                 }
             }
@@ -279,7 +346,13 @@ CastSampleRays(cast_state* State)
                         lane_u32 SphereMatIndex = LaneU32FromU32(Sphere.MatIndex);
                         ConditionalAssign(&HitDistance, HitMask, t);
                         ConditionalAssign(&HitMatIndex, HitMask, SphereMatIndex);
-                        ConditionalAssign(&NextNormal, HitMask, NOZ(t * RayDirection + SphereRelativePosition));
+                        ConditionalAssign(&Normal, HitMask, NOZ(t * RayDirection + SphereRelativePosition));
+                        
+                        lane_v3 SphereTangent = NOZ(Cross(V3FromFLoat(0.0f, 0.0f, 1.0f), Normal));
+                        lane_v3 SphereBiNormal = NOZ(Cross(Normal, SphereTangent));
+                        
+                        ConditionalAssign(&Tangent, HitMask, Tangent);
+                        ConditionalAssign(&BiNormal, HitMask, BiNormal);
                     }
                 }
             }
@@ -295,15 +368,16 @@ CastSampleRays(cast_state* State)
             if (MaskIsZeroed(LaneMask)) {
                 break;
             } else {
-
-                lane_f32 CosAtten = (Max(Inner(-RayDirection, NextNormal), LaneF32FromF32(0.0f)));
-                Attenuation = Hadamard(Attenuation, CosAtten * MatRefColor);
-
                 RayOrigin += HitDistance * RayDirection;
 
-                lane_v3 PureBounce = RayDirection - 2.0f * Inner(RayDirection, NextNormal) * NextNormal;
-                lane_v3 RandomBounce = NOZ(NextNormal + Lane_V3(RandomBilateralLane(&Series), RandomBilateralLane(&Series), RandomBilateralLane(&Series)));
-                RayDirection = NOZ(Lerp(RandomBounce, MatSecular, PureBounce));
+                lane_v3 PureBounce = RayDirection - 2.0f * Inner(RayDirection, Normal) * Normal;
+                lane_v3 RandomBounce = NOZ(Normal + Lane_V3(RandomBilateralLane(&Series), RandomBilateralLane(&Series), RandomBilateralLane(&Series)));
+                lane_v3 NextRayDirection = NOZ(Lerp(RandomBounce, MatSecular, PureBounce));
+                lane_v3 RefC = BRDFLookUp(World->Materials, HitMatIndex, -RayDirection,
+                                          Normal, Tangent, BiNormal, NextRayDirection);
+
+                Attenuation = Hadamard(Attenuation, RefC);
+                RayDirection = NextRayDirection;
             }
         }
 
@@ -394,6 +468,42 @@ renderTile(work_queue* Queue)
     return true;
 }
 
+internal void
+loadMERLBRDF(const char *Filename, brdf_table *Dest) {
+    FILE *File = fopen(Filename, "rb");
+
+    // Todo Change Malloc to Static Allocation
+    if(File) {
+        fread(Dest->Count, sizeof(Dest->Count), 1, File);
+        u32 TotalCount = Dest->Count[0]*Dest->Count[1]*Dest->Count[2];
+        u32 TotalReadSize = TotalCount*sizeof(f64)*3;
+        u32 TotalTableSize = TotalCount*sizeof(v3);
+        f64 *Temp = (f64 *)malloc(TotalReadSize);
+        Dest->Values = (v3 *)malloc(TotalTableSize);
+        fread(Temp, TotalReadSize, 1, File);
+        for(u32 ValueIndex = 0;
+            ValueIndex < TotalCount;
+            ++ValueIndex) {
+                Dest->Values[ValueIndex].x = (f32)Temp[ValueIndex];
+                Dest->Values[ValueIndex].y = (f32)Temp[TotalCount + ValueIndex];
+                Dest->Values[ValueIndex].z = (f32)Temp[2 * TotalCount + ValueIndex];
+            }
+        fclose(File);
+        free(Temp);
+    } else {
+        fprintf(stderr, "[ERROR] Unable to read file %s. \n", Filename);
+
+    }
+}
+
+global v3 NullBRDFValue = {0.0f, 0.0f, 0.0f};
+
+internal void
+NullBRDF(brdf_table * Table) {
+    Table->Count[0] =  Table->Count[1] = Table->Count[2] = 1;
+    Table->Values = &NullBRDFValue;
+}
+
 int main()
 {
 
@@ -413,27 +523,35 @@ int main()
     Materials[6].RefColor = V3_Initialize(0.95f, 0.95f, 0.95f);
     Materials[6].Secular = 1.0f;
 
-    plane Planes[1] = {};
-    Planes[0].MatIndex = 1;
-    Planes[0].N = V3_Initialize(0, 0, 1);
-    Planes[0].d = 0;
+    NullBRDF(&Materials[0].BRDF);
+    loadMERLBRDF("../../merl/fruitwood-241.binary", &Materials[1].BRDF);
+    loadMERLBRDF("../../merl/chrome-steel.binary", &Materials[2].BRDF);
 
-    sphere Sphere[5] = {};
+    // plane Planes[1] = {};
+    // Planes[0].MatIndex = 1;
+    // Planes[0].Normal = V3_Initialize(0, 0, 1);
+    // Planes[0].d = 0;
+    // Planes[0].Normal = {};
+    // Planes[0].BiNormal = {};
+
+    plane Planes[] = { {{0.0f, 0.0f, 0.1f}, {0}, 1} };
+
+    sphere Sphere[1];
     Sphere[0].MatIndex = 2;
     Sphere[0].P = V3_Initialize(0.0f, 0.0f, 0.0f);
     Sphere[0].r = 1.0f;
-    Sphere[1].MatIndex = 3;
-    Sphere[1].P = V3_Initialize(3.0f, -2.0f, 0.0f);
-    Sphere[1].r = 1.0f;
-    Sphere[2].MatIndex = 4;
-    Sphere[2].P = V3_Initialize(-2.0f, -1.0f, 2.0f);
-    Sphere[2].r = 1.0f;
-    Sphere[3].MatIndex = 5;
-    Sphere[3].P = V3_Initialize(1.0f, -1.0f, 3.0f);
-    Sphere[3].r = 1.0f;
-    Sphere[4].MatIndex = 6;
-    Sphere[4].P = V3_Initialize(-2.0f, 3.0f, 0.0f);
-    Sphere[4].r = 1.0f;
+    // Sphere[1].MatIndex = 3;
+    // Sphere[1].P = V3_Initialize(3.0f, -2.0f, 0.0f);
+    // Sphere[1].r = 1.0f;
+    // Sphere[2].MatIndex = 4;
+    // Sphere[2].P = V3_Initialize(-2.0f, -1.0f, 2.0f);
+    // Sphere[2].r = 1.0f;
+    // Sphere[3].MatIndex = 5;
+    // Sphere[3].P = V3_Initialize(1.0f, -1.0f, 3.0f);
+    // Sphere[3].r = 1.0f;
+    // Sphere[4].MatIndex = 6;
+    // Sphere[4].P = V3_Initialize(-2.0f, 3.0f, 0.0f);
+    // Sphere[4].r = 1.0f;
 
     world World = {};
     World.MaterialCount = ArrayCount(Materials);
@@ -449,7 +567,7 @@ int main()
     TileWidth = TileHeight = 64;
     u32 TileCountY = (Image.Height + TileHeight - 1) / TileHeight;
     u32 TileCountX = (Image.Width + TileWidth - 1) / TileWidth;
-    u32 TotalTileCount = TileCountX * TileCountY; // correct
+    u32 TotalTileCount = TileCountX * TileCountY;
 
     work_queue Queue = {};
     Queue.WorkOrders = (work_order*)malloc(TotalTileCount * sizeof(work_order));

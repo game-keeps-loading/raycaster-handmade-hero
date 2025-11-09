@@ -75,14 +75,21 @@ struct  image_u32 {
     u32 *Pixels;
 };
 
+struct brdf_table {
+    u32 Count[3];
+    v3 *Values;
+};
+
 struct  material {
     f32 Secular; // 0 is pure diffuse 1 is mirror
     v3 RefColor;
     v3 EmitColor;
+
+    brdf_table BRDF;
 };
 
 struct plane {
-    v3 N; //vector
+    v3 Normal, Tangent, BiNormal; //vector
     f32 d;
     u32 MatIndex;
 };
